@@ -1,7 +1,11 @@
-"""Event boundary placeholders for the CMS module."""
+"""Event contracts for CMS asynchronous boundaries."""
 
 from typing import Protocol
 
+from app.modules.cms.events.payloads import CMSEvent
+
 
 class CMSEventInterface(Protocol):
-    """Marker protocol for future CMS event contracts."""
+    """Boundary for publishing CMS events."""
+
+    def publish(self, event: CMSEvent) -> None: ...
