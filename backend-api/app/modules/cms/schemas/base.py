@@ -1,7 +1,9 @@
-"""Schema boundary placeholders for the CMS module."""
+"""Shared CMS schema primitives."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class CMSSchemaBase(BaseModel):
-    """Base marker for future CMS transport schemas."""
+    """Base class for CMS transport schemas."""
+
+    model_config = ConfigDict(from_attributes=True)
