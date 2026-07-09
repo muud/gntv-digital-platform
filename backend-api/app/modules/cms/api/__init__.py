@@ -1,4 +1,5 @@
-"""CMS API package placeholder.
+"""CMS API routers."""
 
-No routers are exposed until the CMS architecture is approved.
-"""
+from app.modules.cms.api.content import router as content_router
+
+__all__ = ["content_router"]

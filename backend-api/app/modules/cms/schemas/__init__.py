@@ -13,6 +13,23 @@ from app.modules.cms.schemas.assets import (
     CMSWorkflowTransitionResponse,
 )
 from app.modules.cms.schemas.base import CMSSchemaBase
+from app.modules.cms.schemas.content_core import (
+    CMSCategoryCreate,
+    CMSCategoryResponse,
+    CMSContentCreate,
+    CMSContentListResponse,
+    CMSContentResponse,
+    CMSContentTransitionRequest,
+    CMSContentUpdate,
+    CMSGenreResponse,
+    CMSLanguageCreate,
+    CMSLanguageResponse,
+    CMSRegionCreate,
+    CMSRegionResponse,
+    CMSSEOPayload,
+    CMSTagResponse,
+    CMSTaxonomyCreate,
+)
 
 __all__ = [
     "CMSAssetCreate",
@@ -26,4 +43,19 @@ __all__ = [
     "CMSWorkflowLogResponse",
     "CMSWorkflowTransitionRequest",
     "CMSWorkflowTransitionResponse",
+    "CMSCategoryCreate",
+    "CMSCategoryResponse",
+    "CMSContentCreate",
+    "CMSContentListResponse",
+    "CMSContentResponse",
+    "CMSContentTransitionRequest",
+    "CMSContentUpdate",
+    "CMSGenreResponse",
+    "CMSLanguageCreate",
+    "CMSLanguageResponse",
+    "CMSRegionCreate",
+    "CMSRegionResponse",
+    "CMSSEOPayload",
+    "CMSTagResponse",
+    "CMSTaxonomyCreate",
 ]

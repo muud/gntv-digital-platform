@@ -10,6 +10,11 @@ def test_admin_has_all_cms_scopes() -> None:
             "asset:fact-check",
             "asset:read-draft",
             "asset:read",
+            "content:write",
+            "content:approve",
+            "content:publish",
+            "content:read-draft",
+            "content:read",
         }
     )
 

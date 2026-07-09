@@ -27,3 +27,20 @@ class WorkflowState(StrEnum):
     SCHEDULED = "scheduled"
     PUBLISHED = "published"
     ARCHIVED = "archived"
+
+
+class ContentStatus(StrEnum):
+    DRAFT = "draft"
+    REVIEW = "review"
+    FACT_CHECK = "fact_check"
+    APPROVED = "approved"
+    SCHEDULED = "scheduled"
+    PUBLISHED = "published"
+    ARCHIVED = "archived"
+
+
+class ContentVisibility(StrEnum):
+    PUBLIC = "public"
+    PRIVATE = "private"
+    UNLISTED = "unlisted"
+    MEMBERS = "members"

@@ -4,15 +4,55 @@ from collections.abc import Iterable
 from typing import Literal
 
 CMSRole = Literal["admin", "chief_editor", "editor", "fact_checker", "reporter", "viewer"]
-CMSScope = Literal["system:*", "asset:write", "asset:approve", "asset:fact-check", "asset:read-draft", "asset:read"]
+CMSScope = Literal[
+    "system:*",
+    "asset:write",
+    "asset:approve",
+    "asset:fact-check",
+    "asset:read-draft",
+    "asset:read",
+    "content:write",
+    "content:approve",
+    "content:publish",
+    "content:read-draft",
+    "content:read",
+]
 
 ROLE_SCOPES: dict[str, frozenset[CMSScope]] = {
-    "admin": frozenset({"system:*", "asset:write", "asset:approve", "asset:fact-check", "asset:read-draft", "asset:read"}),
-    "chief_editor": frozenset({"asset:write", "asset:approve", "asset:read-draft", "asset:read"}),
-    "editor": frozenset({"asset:write", "asset:read-draft", "asset:read"}),
-    "fact_checker": frozenset({"asset:fact-check", "asset:read-draft", "asset:read"}),
-    "reporter": frozenset({"asset:write", "asset:read-draft", "asset:read"}),
-    "viewer": frozenset({"asset:read"}),
+    "admin": frozenset({
+        "system:*",
+        "asset:write",
+        "asset:approve",
+        "asset:fact-check",
+        "asset:read-draft",
+        "asset:read",
+        "content:write",
+        "content:approve",
+        "content:publish",
+        "content:read-draft",
+        "content:read",
+    }),
+    "chief_editor": frozenset({
+        "asset:write",
+        "asset:approve",
+        "asset:read-draft",
+        "asset:read",
+        "content:write",
+        "content:approve",
+        "content:publish",
+        "content:read-draft",
+        "content:read",
+    }),
+    "editor": frozenset({"asset:write", "asset:read-draft", "asset:read", "content:write", "content:read-draft", "content:read"}),
+    "fact_checker": frozenset({
+        "asset:fact-check",
+        "asset:read-draft",
+        "asset:read",
+        "content:read-draft",
+        "content:read",
+    }),
+    "reporter": frozenset({"asset:write", "asset:read-draft", "asset:read", "content:write", "content:read-draft", "content:read"}),
+    "viewer": frozenset({"asset:read", "content:read"}),
 }
 
 

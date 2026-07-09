@@ -7,10 +7,12 @@ from app.modules.cms.repositories.interfaces import (
     CMSTranslationRepositoryInterface,
     CMSWorkflowRepositoryInterface,
 )
+from app.modules.cms.repositories.content_repository import CMSContentRepository
 from app.modules.cms.repositories.sqlalchemy_repository import SQLAlchemyCMSRepository
 
 __all__ = [
     "CMSAssetRepositoryInterface",
+    "CMSContentRepository",
     "CMSMediaRepositoryInterface",
     "CMSRepositoryInterface",
     "CMSTranslationRepositoryInterface",
