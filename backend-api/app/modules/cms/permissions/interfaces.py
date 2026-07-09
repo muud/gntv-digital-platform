@@ -1,7 +1,12 @@
-"""Permission boundary placeholders for the CMS module."""
+"""Permission contracts for CMS access control."""
 
+from collections.abc import Iterable
 from typing import Protocol
+
+from app.modules.cms.permissions.matrix import CMSScope
 
 
 class CMSPermissionInterface(Protocol):
-    """Marker protocol for future CMS permission contracts."""
+    """Boundary for CMS permission checks."""
+
+    def has_scope(self, *, roles: Iterable[str], required_scope: CMSScope) -> bool: ...
