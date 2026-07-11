@@ -15,6 +15,10 @@ class CMSSEOPayload(CMSSchemaBase):
     description: str | None = Field(default=None, max_length=500)
     keywords: list[str] = Field(default_factory=list)
     canonical_url: str | None = Field(default=None, max_length=2048)
+    catalog_type: str | None = Field(default=None, max_length=30)
+    category: str | None = Field(default=None, max_length=120)
+    presenter: str | None = Field(default=None, max_length=255)
+    duration: str | None = Field(default=None, max_length=20)
 
 
 class CMSTaxonomyCreate(CMSSchemaBase):

@@ -19,16 +19,6 @@ class ContentType(StrEnum):
     COMMUNITY_POST = "community_post"
 
 
-class WorkflowState(StrEnum):
-    DRAFT = "draft"
-    REVIEW = "review"
-    FACT_CHECK = "fact_check"
-    EDITORIAL_APPROVAL = "editorial_approval"
-    SCHEDULED = "scheduled"
-    PUBLISHED = "published"
-    ARCHIVED = "archived"
-
-
 class ContentStatus(StrEnum):
     DRAFT = "draft"
     REVIEW = "review"

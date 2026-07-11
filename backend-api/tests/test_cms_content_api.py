@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.dependencies.auth import get_current_user
 from app.main import app
-from app.models.user import User
+from app.models.user import Role, User
 from app.modules.cms.api import content as content_api
 from app.modules.cms.models import ContentStatus, ContentType, ContentVisibility
 from app.modules.cms.schemas import (
@@ -148,10 +148,11 @@ class FakeContentCoreService:
 
 
 @pytest.fixture()
-def cms_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
+def cms_client() -> Generator[TestClient, None, None]:
     service = FakeContentCoreService()
     user = User(email="editor@gntv.local", hashed_password="hash", is_active=True, is_verified=True)
     user.id = 7
+    user.roles = [Role(name="admin")]
 
     def override_service() -> FakeContentCoreService:
         return service
@@ -159,7 +160,6 @@ def cms_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, N
     def override_user() -> User:
         return user
 
-    monkeypatch.setattr(content_api, "has_scope", lambda roles, required_scope: True)
     app.dependency_overrides[content_api.get_content_core_service] = override_service
     app.dependency_overrides[get_current_user] = override_user
     try:
@@ -213,3 +213,14 @@ def test_transition_content(cms_client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "review"
+
+
+def test_real_cms_scope_rejects_viewer_role() -> None:
+    dependency = content_api.require_cms_scope("content:write")
+    viewer = User(email="viewer@gntv.local", hashed_password="hash", is_active=True, is_verified=True)
+    viewer.roles = [Role(name="viewer")]
+
+    with pytest.raises(Exception) as exc_info:
+        dependency(current_user=viewer)
+
+    assert getattr(exc_info.value, "status_code", None) == 403

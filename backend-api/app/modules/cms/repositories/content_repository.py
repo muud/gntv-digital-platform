@@ -221,6 +221,10 @@ class CMSContentRepository:
         self.db.flush()
         return content
 
+    def delete_content(self, content: CMSContent) -> None:
+        self.db.delete(content)
+        self.db.flush()
+
     def get_media_file(self, media_file_id: UUID) -> CMSMediaFile | None:
         return self.db.get(CMSMediaFile, media_file_id)
 

@@ -10,7 +10,7 @@ from app.modules.cms.events import (
     CMSSearchIndexRequested,
     CMSWorkflowTransitioned,
 )
-from app.modules.cms.models import WorkflowState
+from app.modules.cms.models import ContentStatus
 
 
 def test_ai_enrichment_event_payload() -> None:
@@ -53,13 +53,13 @@ def test_workflow_transition_event_payload() -> None:
     event = CMSWorkflowTransitioned(
         asset_id=uuid4(),
         actor_id=7,
-        old_state=WorkflowState.DRAFT,
-        new_state=WorkflowState.REVIEW,
+        old_state=ContentStatus.DRAFT,
+        new_state=ContentStatus.REVIEW,
     )
 
     assert event.event_name == "cms.workflow_transitioned"
-    assert event.old_state == WorkflowState.DRAFT
-    assert event.new_state == WorkflowState.REVIEW
+    assert event.old_state == ContentStatus.DRAFT
+    assert event.new_state == ContentStatus.REVIEW
     assert event.actor_id == 7
 
 

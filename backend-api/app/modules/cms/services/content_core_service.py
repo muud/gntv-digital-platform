@@ -220,6 +220,11 @@ class CMSContentCoreService:
         )
         return self.to_content_response(updated)
 
+    def delete_content(self, content_id: UUID, *, actor_id: int) -> None:
+        content = self._require_content(content_id)
+        self.repository.delete_content(content)
+        self._audit(actor_id, "cms.content.deleted", {"content_id": str(content_id)})
+
     def to_content_response(self, content: CMSContent) -> CMSContentResponse:
         return CMSContentResponse(
             id=content.id,

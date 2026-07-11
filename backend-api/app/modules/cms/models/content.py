@@ -8,8 +8,8 @@ from sqlalchemy import Column, DateTime, Enum, ForeignKey, Index, JSON, String, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.modules.cms.models.asset import CMSMediaFile, content_type_enum
 from app.modules.cms.models.base import AuditBase, ContentBase, LocalizationBase, MediaAssetBase, WorkflowBase
+from app.modules.cms.media.models import CMSMediaFile
 from app.modules.cms.models.enums import ContentStatus, ContentType, ContentVisibility
 
 if TYPE_CHECKING:
@@ -25,6 +25,12 @@ content_status_enum = Enum(
 content_visibility_enum = Enum(
     ContentVisibility,
     name="gntv_content_visibility",
+    values_callable=lambda enum: [member.value for member in enum],
+)
+
+content_type_enum = Enum(
+    ContentType,
+    name="gntv_content_type",
     values_callable=lambda enum: [member.value for member in enum],
 )
 

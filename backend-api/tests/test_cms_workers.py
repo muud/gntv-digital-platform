@@ -7,7 +7,7 @@ from app.modules.cms.events import (
     CMSSearchIndexRequested,
     CMSWorkflowTransitioned,
 )
-from app.modules.cms.models import WorkflowState
+from app.modules.cms.models import ContentStatus
 from app.modules.cms.workers import (
     AI_ENRICHMENT_TASK,
     CDN_CACHE_PURGE_TASK,
@@ -63,8 +63,8 @@ def test_workflow_event_payload() -> None:
     event = CMSWorkflowTransitioned(
         asset_id=asset_id,
         actor_id=99,
-        old_state=WorkflowState.DRAFT,
-        new_state=WorkflowState.REVIEW,
+        old_state=ContentStatus.DRAFT,
+        new_state=ContentStatus.REVIEW,
     )
 
     assert task_name_for_event(event) == WORKFLOW_TRANSITION_TASK

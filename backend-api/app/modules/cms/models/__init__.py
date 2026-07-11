@@ -1,6 +1,5 @@
 """CMS domain model placeholders."""
 
-from app.modules.cms.models.asset import CMSAsset, CMSAssetTranslation, CMSMediaFile, CMSWorkflowLog
 from app.modules.cms.models.base import (
     AuditBase,
     ContentBase,
@@ -20,12 +19,12 @@ from app.modules.cms.models.content import (
     cms_content_regions,
     cms_content_tags,
 )
-from app.modules.cms.models.enums import ContentStatus, ContentType, ContentVisibility, WorkflowState
+from app.modules.cms.models.enums import ContentStatus, ContentType, ContentVisibility
+from app.modules.cms.media.models import AssetType, CMSMediaFile, ProcessingStatus, UploadStatus, URLStrategy
 
 __all__ = [
     "AuditBase",
-    "CMSAsset",
-    "CMSAssetTranslation",
+    "AssetType",
     "CMSCategory",
     "CMSContent",
     "CMSGenre",
@@ -33,15 +32,16 @@ __all__ = [
     "CMSMediaFile",
     "CMSRegion",
     "CMSTag",
-    "CMSWorkflowLog",
     "ContentStatus",
     "ContentBase",
     "ContentType",
     "ContentVisibility",
     "LocalizationBase",
+    "ProcessingStatus",
+    "UploadStatus",
+    "URLStrategy",
     "MediaAssetBase",
     "WorkflowBase",
-    "WorkflowState",
     "cms_content_genres",
     "cms_content_media_assets",
     "cms_content_regions",

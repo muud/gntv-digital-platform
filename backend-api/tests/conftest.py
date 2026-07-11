@@ -11,13 +11,15 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.auth_extra import EmailVerification, FailedLoginAttempt, PasswordReset, RefreshToken
-from app.models.user import Device, Permission, Profile, Role, User, UserSession
+from app.models.user import Device, Permission, Profile, Role, User, UserSession, role_permissions, user_roles
 
 AUTH_TABLES: list[Table] = [
     cast(Table, User.__table__),
     cast(Table, Profile.__table__),
     cast(Table, Role.__table__),
     cast(Table, Permission.__table__),
+    user_roles,
+    role_permissions,
     cast(Table, Device.__table__),
     cast(Table, UserSession.__table__),
     cast(Table, EmailVerification.__table__),

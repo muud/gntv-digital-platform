@@ -45,7 +45,7 @@ def get_content_core_service(db: Session = Depends(get_db)) -> CMSContentCoreSer
 
 def require_cms_scope(required_scope: CMSScope) -> Callable[..., User]:
     def dependency(current_user: User = Depends(get_current_user)) -> User:
-        if not has_scope(roles=[current_user.role], required_scope=required_scope):
+        if not has_scope(roles=current_user.role_names, required_scope=required_scope):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"CMS scope required: {required_scope}")
         return current_user
 
@@ -53,11 +53,13 @@ def require_cms_scope(required_scope: CMSScope) -> Callable[..., User]:
 
 
 def _validation_error(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    del exc
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "cms_validation_error"})
 
 
 def _not_found(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    del exc
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "cms_content_not_found"})
 
 
 @router.post("/languages", response_model=CMSLanguageResponse, status_code=status.HTTP_201_CREATED)
@@ -157,8 +159,10 @@ def list_content(
     category_id: UUID | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(require_cms_scope("content:read-draft")),
     service: CMSContentCoreService = Depends(get_content_core_service),
 ) -> CMSContentListResponse:
+    del current_user
     return service.list_content(
         status=status_filter,
         visibility=visibility,
@@ -171,7 +175,12 @@ def list_content(
 
 
 @router.get("/content/{content_id}", response_model=CMSContentResponse)
-def get_content(content_id: UUID, service: CMSContentCoreService = Depends(get_content_core_service)) -> CMSContentResponse:
+def get_content(
+    content_id: UUID,
+    current_user: User = Depends(require_cms_scope("content:read-draft")),
+    service: CMSContentCoreService = Depends(get_content_core_service),
+) -> CMSContentResponse:
+    del current_user
     try:
         return service.get_content(content_id)
     except CMSContentNotFoundError as exc:
@@ -191,6 +200,18 @@ def update_content(
         raise _not_found(exc) from exc
     except CMSValidationError as exc:
         raise _validation_error(exc) from exc
+
+
+@router.delete("/content/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_content(
+    content_id: UUID,
+    current_user: User = Depends(require_cms_scope("content:write")),
+    service: CMSContentCoreService = Depends(get_content_core_service),
+) -> None:
+    try:
+        service.delete_content(content_id, actor_id=current_user.id)
+    except CMSContentNotFoundError as exc:
+        raise _not_found(exc) from exc
 
 
 @router.post("/content/{content_id}/workflow", response_model=CMSContentResponse)

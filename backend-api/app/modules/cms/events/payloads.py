@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Literal, TypeAlias
 from uuid import UUID
 
-from app.modules.cms.models import WorkflowState
+from app.modules.cms.models import ContentStatus
 
 CMSEventName: TypeAlias = Literal[
     "cms.ai_enrichment_requested",
@@ -49,8 +49,8 @@ class CMSSearchIndexRequested(CMSAssetEvent):
 
 @dataclass(frozen=True, kw_only=True)
 class CMSWorkflowTransitioned(CMSAssetEvent):
-    old_state: WorkflowState | None
-    new_state: WorkflowState
+    old_state: ContentStatus | None
+    new_state: ContentStatus
     actor_id: int
     event_name: CMSEventName = "cms.workflow_transitioned"
 
