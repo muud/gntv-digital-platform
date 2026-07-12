@@ -7,6 +7,7 @@ from app.core.database import Base
 
 from app.models import audit, auth_extra, user  # noqa: F401
 from app.modules.cms import models as cms_models  # noqa: F401
+from app.modules.catalog import models as catalog_models  # noqa: F401
 
 target_metadata = Base.metadata
 

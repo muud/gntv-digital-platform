@@ -59,6 +59,18 @@ class LocalStorageProvider(StorageProvider):
         signature = hmac.new(self.secret, f"{operation}:{key}:{expires}".encode(), sha256).hexdigest()
         return f"{self.public_base_url}/{operation}/{quote(key)}?expires={expires}&signature={signature}"
 
+    def validate_signature(self, key: str, operation: str, expires: int, signature: str) -> bool:
+        if expires < int(datetime.now(UTC).timestamp()):
+            return False
+        expected = hmac.new(self.secret, f"{operation}:{key}:{expires}".encode(), sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
+
+    def path_for_download(self, key: str) -> Path:
+        path = self._path(key)
+        if not path.is_file():
+            raise StorageError("Stored object does not exist")
+        return path
+
     def exists(self, key: str) -> bool:
         return self._path(key).is_file()
 

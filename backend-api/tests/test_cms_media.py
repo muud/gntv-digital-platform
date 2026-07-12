@@ -20,7 +20,7 @@ from app.modules.cms.media.permissions import require_media_scope
 from app.modules.cms.media.repositories import MediaRepository
 from app.modules.cms.media.schemas import UploadRequest
 from app.modules.cms.media.services import MediaService, MediaValidationError
-from app.modules.cms.media.services.storage import LocalStorageProvider, StorageError
+from app.modules.cms.media.services.storage import LocalStorageProvider, OSSStorageProvider, StorageError
 
 
 @pytest.fixture()
@@ -67,6 +67,44 @@ def test_local_upload_flow_and_audit(media_context: tuple[TestClient, Session, L
     assert events == ["cms.media.upload_requested", "cms.media.upload_confirmed"]
 
 
+@pytest.mark.parametrize(
+    ("asset_type", "filename", "mime_type"),
+    [
+        ("image", "photo.jpg", "image/jpeg"),
+        ("video", "source.mp4", "video/mp4"),
+        ("audio", "programme.mp3", "audio/mpeg"),
+        ("subtitle", "english.vtt", "text/vtt"),
+        ("poster", "poster.png", "image/png"),
+        ("thumbnail", "thumb.webp", "image/webp"),
+        ("hero", "hero.jpg", "image/jpeg"),
+        ("channel_logo", "gntv-logo.svg", "image/svg+xml"),
+    ],
+)
+def test_supported_frontend_upload_types(
+    media_context: tuple[TestClient, Session, LocalStorageProvider],
+    asset_type: str,
+    filename: str,
+    mime_type: str,
+) -> None:
+    client, db, storage = media_context
+    data = f"local-{asset_type}-bytes".encode()
+    checksum = sha256(data).hexdigest()
+    requested = client.post(
+        "/api/v1/cms/media/uploads",
+        json={"asset_type": asset_type, "filename": filename, "mime_type": mime_type, "file_size": len(data), "checksum": checksum},
+    )
+    assert requested.status_code == 201
+    asset = db.get(CMSMediaFile, UUID(requested.json()["asset_id"]))
+    assert asset is not None
+    assert "/" not in asset.storage_filename and ".." not in asset.storage_filename
+    storage.put(asset.storage_key, data)
+    confirmed = client.post(f"/api/v1/cms/media/{asset.id}/confirm", json={"checksum": checksum})
+    assert confirmed.status_code == 200
+    assert confirmed.json()["asset_type"] == asset_type
+    assert confirmed.json()["upload_status"] == "uploaded"
+    assert confirmed.json()["processing_status"] == "ready"
+
+
 def test_list_update_delete_restore_and_bulk(media_context: tuple[TestClient, Session, LocalStorageProvider]) -> None:
     client, _, storage = media_context
     service = MediaService(MediaRepository(next(iter(app.dependency_overrides[get_db]()))), storage, None, 1000, 60)
@@ -110,6 +148,42 @@ def test_storage_signing_and_path_safety(tmp_path: Path) -> None:
     assert "signature=" in storage.download_url("safe/file.txt", public=False, expires_in=60)
     with pytest.raises(StorageError):
         storage.put("../escape.txt", b"no")
+
+
+def test_alibaba_oss_storage_abstraction_without_network() -> None:
+    class FakeObject:
+        def __iter__(self) -> object:
+            return iter((b"oss-", b"bytes"))
+
+    class FakeBucket:
+        def __init__(self) -> None:
+            self.objects: dict[str, bytes] = {}
+
+        def sign_url(self, method: str, key: str, expires: int, headers: dict[str, str] | None = None) -> str:
+            del headers
+            return f"https://bucket.oss.example/{key}?method={method}&expires={expires}&signature=test"
+
+        def object_exists(self, key: str) -> bool:
+            return key in self.objects
+
+        def get_object(self, key: str) -> FakeObject:
+            del key
+            return FakeObject()
+
+        def put_object(self, key: str, data: bytes) -> None:
+            self.objects[key] = data
+
+    provider = OSSStorageProvider.__new__(OSSStorageProvider)
+    provider.bucket = FakeBucket()
+    upload_url, headers = provider.create_upload_url("media/test.mp4", "video/mp4", 300)
+    provider.put("media/test.mp4", b"oss-bytes")
+
+    assert provider.name == "oss"
+    assert "method=PUT" in upload_url
+    assert headers == {"Content-Type": "video/mp4"}
+    assert provider.exists("media/test.mp4")
+    assert provider.checksum("media/test.mp4") == sha256(b"oss-bytes").hexdigest()
+    assert "method=GET" in provider.download_url("media/test.mp4", public=False, expires_in=300)
 
 
 def test_media_rbac_and_openapi(media_context: tuple[TestClient, Session, LocalStorageProvider]) -> None:

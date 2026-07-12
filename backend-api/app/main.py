@@ -8,7 +8,9 @@ from app.core.config import settings
 from app.core.redis import lifespan
 from app.models import audit, auth_extra, user  # noqa: F401
 from app.modules.cms.api import content_router
+from app.modules.cms.media.api import download_router as media_download_router
 from app.modules.cms.media.api import router as media_router
+from app.modules.catalog.api import router as catalog_router
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -26,3 +28,5 @@ app.include_router(auth.router)
 app.include_router(content.router)
 app.include_router(content_router)
 app.include_router(media_router)
+app.include_router(media_download_router)
+app.include_router(catalog_router)

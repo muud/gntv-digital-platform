@@ -3,6 +3,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -17,6 +18,7 @@ from app.modules.cms.media.services.storage import LocalStorageProvider, OSSStor
 from app.repositories.audit_repository import AuditRepository
 
 router = APIRouter(prefix="/api/v1/cms/media", tags=["CMS Media Library"])
+download_router = APIRouter(tags=["CMS Media Library"])
 
 
 def get_storage_provider() -> StorageProvider:
@@ -31,6 +33,16 @@ def get_media_service(db: Session = Depends(get_db), storage: StorageProvider = 
 
 def media_error(exc: MediaError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND if isinstance(exc, MediaNotFound) else status.HTTP_400_BAD_REQUEST, detail={"code": exc.code})
+
+
+@download_router.get("/media/download/{key:path}", include_in_schema=False)
+def local_signed_download(key: str, expires: int, signature: str, storage: StorageProvider = Depends(get_storage_provider)) -> FileResponse:
+    if not isinstance(storage, LocalStorageProvider) or not storage.validate_signature(key, "download", expires, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": "media_signature_invalid"})
+    try:
+        return FileResponse(storage.path_for_download(key))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "media_object_not_found"}) from exc
 
 
 @router.post("/uploads", response_model=UploadTarget, status_code=status.HTTP_201_CREATED)
@@ -124,4 +136,4 @@ def bulk(payload: BulkActionRequest, user: User = Depends(require_media_scope("a
         raise media_error(exc) from exc
 
 
-__all__ = ["get_media_service", "get_storage_provider", "router"]
+__all__ = ["download_router", "get_media_service", "get_storage_provider", "router"]
