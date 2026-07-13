@@ -1,6 +1,7 @@
 """Real-JWT local E2E validation for CMS Module 3."""
 
 from collections.abc import Generator
+from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -112,7 +113,7 @@ def test_real_jwt_catalog_crud_and_personalization(
         }
         r = c.post("/api/v1/catalog/items", headers=admin, json=body)
         assert r.status_code == 201, r.text
-        return r.json()
+        return cast(dict[str, object], r.json())
 
     movie = create(
         "movie",
