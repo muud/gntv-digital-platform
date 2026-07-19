@@ -12,7 +12,7 @@ The standard forward path is:
 
 `draft → in_review → fact_check → legal_review → editorial_approval → approved → scheduled → published → expired → archived`
 
-Approved content may publish immediately. Published content may be emergency-unpublished to `expired`, and expired content may be republished. Review stages may reject content back to `draft`; a rejection note is mandatory. Terminal archived content cannot transition.
+Approved content may publish immediately. Published content may be emergency-unpublished to `expired`, and expired content may be republished. Review stages may reject content back to `draft`; a rejection note is mandatory. Archived content cannot use the generic transition endpoint, but an admin or chief editor can explicitly restore it to `approved` for a fresh scheduling or publishing decision.
 
 Transition authorization is enforced in the service layer:
 
@@ -26,6 +26,7 @@ Transition authorization is enforced in the service layer:
 | Schedule/publish | admin, chief_editor, producer |
 | Emergency unpublish/republish | admin, chief_editor |
 | Archive | admin, chief_editor |
+| Restore archived workflow | admin, chief_editor |
 
 ## Endpoints
 
@@ -37,6 +38,7 @@ Transition authorization is enforced in the service layer:
 | `GET` | `/workflows/{workflow_id}` | Read workflow state and publication plan |
 | `PATCH` | `/workflows/{workflow_id}/planning` | Set priority and due date |
 | `POST` | `/workflows/{workflow_id}/transitions` | Apply an authorized state transition |
+| `POST` | `/workflows/{workflow_id}/restore` | Restore archived content to approved and clear obsolete publication planning |
 | `PUT` | `/workflows/{workflow_id}/assignments` | Assign or reassign reporter, editor, or producer |
 | `GET` | `/workflows/{workflow_id}/assignments` | List current assignments |
 

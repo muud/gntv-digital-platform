@@ -14,7 +14,8 @@ from app.main import app
 from app.models.audit import AuditLog
 from app.models.user import Role, User
 from app.modules.cms.models import CMSContent, CMSLanguage, ContentType
-from app.modules.editorial.models import EditorialNotification, EditorialWorkflow, WorkflowState
+from app.modules.editorial.models import EditorialActivity, EditorialNotification, EditorialWorkflow, WorkflowState
+from app.modules.editorial.service import TARGET_ROLES, TRANSITIONS
 
 
 @pytest.fixture()
@@ -119,11 +120,21 @@ def test_complete_editorial_api_lifecycle(editorial_client: tuple[TestClient, Se
     assert restored.status_code == 200 and restored.json()["version"] == 3
     assert len(client.get(f"/api/v1/editorial/workflows/{workflow_id}/revisions").json()) == 3
 
+    updated_due_at = datetime.now(UTC) + timedelta(days=1)
     planned = client.patch(
         f"/api/v1/editorial/workflows/{workflow_id}/planning",
-        json={"priority": "urgent", "expected_version": 4},
+        json={"priority": "urgent", "due_at": updated_due_at.isoformat(), "expected_version": 4},
     )
     assert planned.status_code == 200 and planned.json()["lock_version"] == 5
+    planning_activity = (
+        db.query(EditorialActivity)
+        .filter(EditorialActivity.workflow_id == UUID(workflow_id), EditorialActivity.event_type == "workflow.planning_updated")
+        .one()
+    )
+    assert planning_activity.data["due_at"] == updated_due_at.isoformat()
+    planning_audit = db.query(AuditLog).filter(AuditLog.event_type == "editorial.workflow.planning_updated").one()
+    assert planning_audit.metadata_ is not None
+    assert planning_audit.metadata_["due_at"] == updated_due_at.isoformat()
     stale = client.patch(
         f"/api/v1/editorial/workflows/{workflow_id}/planning",
         json={"priority": "low", "expected_version": 4},
@@ -268,3 +279,79 @@ def test_rejection_requires_reason_and_auto_unpublish(editorial_client: tuple[Te
     result = client.post("/api/v1/editorial/publishing/process-due").json()
     assert result["unpublished"] == 1
     assert db.get(EditorialWorkflow, workflow_uuid).state == WorkflowState.EXPIRED  # type: ignore[union-attr]
+
+
+def test_archived_workflow_restore_contract(
+    editorial_client: tuple[TestClient, Session, dict[str, User | CMSContent]],
+) -> None:
+    client, db, context = editorial_client
+    content = context["content"]
+    assert isinstance(content, CMSContent)
+    item = client.post("/api/v1/editorial/workflows", json={"content_id": str(content.id)}).json()
+
+    not_archived = client.post(
+        f"/api/v1/editorial/workflows/{item['id']}/restore",
+        json={"expected_version": item["lock_version"], "reason": "Invalid early restore"},
+    )
+    assert not_archived.status_code == 422
+
+    for state in ["in_review", "fact_check", "legal_review", "editorial_approval", "approved", "archived"]:
+        item = client.post(
+            f"/api/v1/editorial/workflows/{item['id']}/transitions",
+            json={"target_state": state, "expected_version": item["lock_version"], "note": f"Move to {state}"},
+        ).json()
+    assert item["state"] == "archived"
+
+    app.dependency_overrides[get_current_user] = lambda: context["editor"]
+    forbidden = client.post(
+        f"/api/v1/editorial/workflows/{item['id']}/restore",
+        json={"expected_version": item["lock_version"], "reason": "Editor attempt"},
+    )
+    assert forbidden.status_code == 403
+
+    app.dependency_overrides[get_current_user] = lambda: context["admin"]
+    restored = client.post(
+        f"/api/v1/editorial/workflows/{item['id']}/restore",
+        json={"expected_version": item["lock_version"], "reason": "Archive was premature"},
+    )
+    assert restored.status_code == 200, restored.text
+    body = restored.json()
+    assert body["state"] == "approved"
+    assert body["lock_version"] == item["lock_version"] + 1
+    assert body["scheduled_at"] is None
+    assert body["timezone"] is None
+    assert body["embargo_at"] is None
+    assert body["unpublish_at"] is None
+    assert body["published_at"] is None
+
+    stale = client.post(
+        f"/api/v1/editorial/workflows/{item['id']}/restore",
+        json={"expected_version": item["lock_version"], "reason": "Stale retry"},
+    )
+    assert stale.status_code == 422
+    activity = client.get(f"/api/v1/editorial/workflows/{item['id']}/activity").json()
+    assert any(entry["event_type"] == "workflow.restored" for entry in activity)
+    audit = db.query(AuditLog).filter(AuditLog.event_type == "editorial.workflow.restored").one()
+    assert audit.metadata_ is not None and audit.metadata_["reason"] == "Archive was premature"
+    assert db.query(EditorialNotification).filter(
+        EditorialNotification.workflow_id == UUID(item["id"]),
+        EditorialNotification.event_type == "editorial.workflow.restored",
+    ).count() == 3
+
+
+def test_workflow_transition_registry_is_complete() -> None:
+    assert TRANSITIONS == {
+        WorkflowState.DRAFT: {WorkflowState.IN_REVIEW},
+        WorkflowState.IN_REVIEW: {WorkflowState.DRAFT, WorkflowState.FACT_CHECK},
+        WorkflowState.FACT_CHECK: {WorkflowState.DRAFT, WorkflowState.LEGAL_REVIEW},
+        WorkflowState.LEGAL_REVIEW: {WorkflowState.DRAFT, WorkflowState.EDITORIAL_APPROVAL},
+        WorkflowState.EDITORIAL_APPROVAL: {WorkflowState.DRAFT, WorkflowState.APPROVED},
+        WorkflowState.APPROVED: {WorkflowState.SCHEDULED, WorkflowState.PUBLISHED, WorkflowState.ARCHIVED},
+        WorkflowState.SCHEDULED: {WorkflowState.PUBLISHED, WorkflowState.ARCHIVED},
+        WorkflowState.PUBLISHED: {WorkflowState.EXPIRED, WorkflowState.ARCHIVED},
+        WorkflowState.EXPIRED: {WorkflowState.PUBLISHED, WorkflowState.ARCHIVED},
+        WorkflowState.ARCHIVED: set(),
+    }
+    assert set(TRANSITIONS) == set(WorkflowState)
+    assert set(TARGET_ROLES) == set(WorkflowState)
+    assert all(TARGET_ROLES[state] for targets in TRANSITIONS.values() for state in targets)

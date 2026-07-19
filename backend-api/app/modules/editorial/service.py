@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from fastapi.encoders import jsonable_encoder
+
 from app.modules.editorial.models import CommentKind, Priority, WorkflowState
 from app.modules.editorial.repository import EditorialRepository
 from app.modules.editorial.schemas import (
@@ -15,6 +17,7 @@ from app.modules.editorial.schemas import (
     ScheduleRequest,
     TransitionRequest,
     VersionComparison,
+    WorkflowRestoreRequest,
 )
 from app.repositories.audit_repository import AuditRepository
 
@@ -166,6 +169,36 @@ class EditorialService:
         self._event(workflow_id, actor_id, "revision.restored", {"source_version": version, "version": restored.version})
         return restored
 
+    def restore_archived(
+        self,
+        workflow_id: UUID,
+        request: WorkflowRestoreRequest,
+        actor_id: int,
+        roles: set[str],
+    ) -> Any:
+        self._roles(roles, {"admin", "chief_editor"})
+        item = self.require(workflow_id)
+        if item.state != WorkflowState.ARCHIVED:
+            raise InvalidTransition("Only archived content can be restored")
+        self._update(
+            item,
+            request.expected_version,
+            actor_id,
+            {
+                "state": WorkflowState.APPROVED,
+                "scheduled_at": None,
+                "timezone": None,
+                "embargo_at": None,
+                "unpublish_at": None,
+                "published_at": None,
+                "last_error": None,
+            },
+        )
+        payload = {"from": WorkflowState.ARCHIVED.value, "to": WorkflowState.APPROVED.value, "reason": request.reason}
+        self._event(item.id, actor_id, "workflow.restored", payload)
+        self._notify(item.id, None, "editorial.workflow.restored", {"content_id": str(item.content_id), **payload})
+        return item
+
     def schedule(self, workflow_id: UUID, request: ScheduleRequest, actor_id: int, roles: set[str]) -> Any:
         self._roles(roles, {"admin", "chief_editor", "producer"})
         item = self.require(workflow_id)
@@ -258,9 +291,10 @@ class EditorialService:
             raise Forbidden("Role cannot perform this editorial action")
 
     def _event(self, workflow_id: UUID, actor_id: int, event: str, data: dict[str, Any]) -> None:
-        self.repository.activity(workflow_id, actor_id, event, data)
+        serialized: dict[str, Any] = jsonable_encoder(data)
+        self.repository.activity(workflow_id, actor_id, event, serialized)
         if self.audit:
-            self.audit.create(actor_id, f"editorial.{event}", {"workflow_id": str(workflow_id), **data})
+            self.audit.create(actor_id, f"editorial.{event}", {"workflow_id": str(workflow_id), **serialized})
 
     def _notify(self, workflow_id: UUID, recipient_id: int | None, event: str, payload: dict[str, Any]) -> None:
         self.repository.notify(workflow_id, recipient_id, event, payload)

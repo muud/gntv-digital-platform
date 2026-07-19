@@ -30,6 +30,7 @@ from app.modules.editorial.schemas import (
     TransitionRequest,
     VersionComparison,
     WorkflowCreate,
+    WorkflowRestoreRequest,
     WorkflowResponse,
 )
 from app.modules.editorial.service import Conflict, EditorialError, EditorialService, Forbidden, NotFound
@@ -92,6 +93,21 @@ def planning(workflow_id: UUID, payload: PlanningUpdate, user: WriteUser, svc: S
 def transition(workflow_id: UUID, payload: TransitionRequest, user: WriteUser, svc: Service) -> WorkflowResponse:
     try:
         return WorkflowResponse.model_validate(svc.transition(workflow_id, payload, user.id, set(user.role_names)))
+    except EditorialError as exc:
+        raise failure(exc) from exc
+
+
+@router.post("/workflows/{workflow_id}/restore", response_model=WorkflowResponse)
+def restore_archived(
+    workflow_id: UUID,
+    payload: WorkflowRestoreRequest,
+    user: WriteUser,
+    svc: Service,
+) -> WorkflowResponse:
+    try:
+        return WorkflowResponse.model_validate(
+            svc.restore_archived(workflow_id, payload, user.id, set(user.role_names))
+        )
     except EditorialError as exc:
         raise failure(exc) from exc
 
@@ -268,7 +284,7 @@ def recent(user: ReadUser, svc: Service) -> list[ActivityResponse]:
     return [ActivityResponse.model_validate(x) for x in svc.repository.activities()]
 
 
-@router.delete("/notifications/{notification_id}", status_code=204, include_in_schema=False)
+@router.delete("/notifications/{notification_id}", status_code=204)
 def dismiss_notification(notification_id: UUID, user: ReadUser) -> Response:
     del notification_id, user
     return Response(status_code=204)

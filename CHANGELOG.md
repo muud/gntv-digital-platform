@@ -2,6 +2,27 @@
 
 All notable changes to GNTV DIGITAL are documented here.
 
+## [0.5.0] — 2026-07-19
+
+### Added
+
+- CMS Module 4 Editorial Workflow & Publishing with ten workflow states, role-aware transitions, assignments, collaboration notes, revision history, planning, scheduling, publication lifecycle processing, notifications, dashboards, audit events, and optimistic locking.
+- Explicit `POST /api/v1/editorial/workflows/{workflow_id}/restore` recovery for archived workflows, restricted to administrators and chief editors.
+- Editorial OpenAPI contract checks covering all 25 Editorial paths and their success responses.
+
+### Fixed
+
+- Editorial activity and audit payloads now JSON-encode datetime values before PostgreSQL persistence, preventing due-date planning updates from failing with HTTP 500.
+- Archived workflows can be restored to `approved` for a new scheduling or publishing decision while obsolete publication fields are cleared.
+- Notification dismissal is included in the generated OpenAPI document.
+
+### Verification
+
+- 79 tests passed with 98.58% configured coverage.
+- MyPy reported zero errors across 87 source files.
+- Ruff, OpenAPI validation, Alembic head `202607131200`, and PostgreSQL Editorial lifecycle validation passed.
+- CMS Module 5 was not started and is outside this release.
+
 ## [0.4.0] — 2026-07-12
 
 ### Added
@@ -36,3 +57,4 @@ All notable changes to GNTV DIGITAL are documented here.
 - PostgreSQL migration and ORM round-trip validation passed at Alembic head `202607121200`.
 
 [0.4.0]: https://github.com/gntv-digital/platform/releases/tag/v0.4.0
+[0.5.0]: https://github.com/gntv-digital/platform/releases/tag/v0.5.0

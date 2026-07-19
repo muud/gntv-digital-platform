@@ -138,6 +138,11 @@ class PublishRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)
 
 
+class WorkflowRestoreRequest(BaseModel):
+    expected_version: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class ActivityResponse(ORMModel):
     id: UUID
     workflow_id: UUID
