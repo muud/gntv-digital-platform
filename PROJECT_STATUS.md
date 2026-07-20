@@ -1,7 +1,7 @@
 # Project Status — GNTV DIGITAL v0.5.0
 
-Overall status: **RELEASE READY**  
-Date: 2026-07-19
+Overall status: **RELEASED**
+Date: 2026-07-20
 
 ## Completed milestones
 
@@ -24,8 +24,9 @@ Date: 2026-07-19
 | Coverage | 98.58% |
 | MyPy | Zero errors, 87 files |
 | Ruff | Passed |
-| OpenAPI | Passed |
+| OpenAPI | Passed — 3.1.0, 69 paths, 25 Editorial paths / 28 operations |
 | PostgreSQL | Migration and ORM round-trips passed |
+| Production configuration | Production-shaped external settings load passed |
 | Module 2 E2E | Completed |
 | Module 3 E2E | PASS |
 | Module 4 Editorial E2E | PASS |
@@ -36,6 +37,6 @@ Date: 2026-07-19
 - OSS credentials, production buckets, JWT secrets, database credentials, and CDN settings must be supplied through deployment environments.
 - Existing deprecation warnings should be addressed before future major dependency upgrades but do not block v0.5.0.
 
-## Release boundary
+## Release boundary and next module
 
-CMS Module 4 is finalized for v0.5.0. CMS Module 5 has not been started, is not part of this release, and requires separate authorization before any implementation begins.
+CMS Module 4 is approved and finalized for v0.5.0. The project is ready for Module 5 under its separately approved scope. Module 5 has not been started and no Module 5 routes, models, migrations, workers, tests, or documentation are included in this release.

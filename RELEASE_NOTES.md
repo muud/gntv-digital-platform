@@ -1,7 +1,7 @@
 # GNTV DIGITAL v0.5.0 Release Notes
 
-Release date: 2026-07-19
-Release status: **CMS Module 4 finalized**
+Release date: 2026-07-20
+Release status: **Released — CMS Module 4 approved and finalized**
 
 GNTV DIGITAL v0.5.0 completes the backend Editorial Workflow & Publishing module and its release-blocking verification hotfixes. It builds on the platform, authentication, Content Core, Media Library, and Premium Streaming Catalog delivered through v0.4.0.
 
@@ -22,11 +22,13 @@ GNTV DIGITAL v0.5.0 completes the backend Editorial Workflow & Publishing module
 
 ## Quality status
 
-The release was verified with 79 passing tests, 98.58% configured coverage, zero MyPy errors across 87 source files, passing Ruff checks, valid OpenAPI, and a successful PostgreSQL Editorial lifecycle run.
+The release was verified with 79 passing tests, 98.58% configured coverage, zero MyPy errors across 87 source files, passing Ruff checks, valid OpenAPI 3.1, Alembic single head `202607131200`, and a successful PostgreSQL Editorial lifecycle run. Production-shaped settings also loaded successfully with externalized PostgreSQL, Redis, OSS, JWT, and media-signing values.
 
 ## Explicit exclusions
 
 This release does not start or include CMS Module 5. Distribution and geo-fencing work remains outside the authorized release scope. FFmpeg transcoding, adaptive bitrate packaging, CDN publication, and a production downstream publisher adapter also remain future work.
+
+CMS Module 4 approval makes the project ready to begin Module 5 as a separate implementation effort; no Module 5 code is included in v0.5.0.
 
 ## Upgrade notes
 

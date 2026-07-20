@@ -8,7 +8,25 @@
 - CMS Module 2 Media Library and storage abstraction
 - CMS Module 3 Premium Streaming Catalog Engine
 
-## Next candidate — approval required
+## Released — v0.5.0
+
+- CMS Module 4 Editorial Workflow & Publishing backend
+- Ten-state workflow, assignments, collaboration, revision history, scheduling, publication lifecycle, notifications, dashboards, audit events, and optimistic locking
+- Archived-workflow restore and PostgreSQL-safe Editorial audit/activity serialization
+- Validated Editorial OpenAPI contracts and Module 4 release-blocker regression coverage
+
+## Ready next — Module 5
+
+### Distribution and geo-fencing
+
+CMS Module 4 approval clears the project to begin Module 5 as a separate scoped effort. No Module 5 implementation is included in v0.5.0.
+
+- Distribution targets and delivery policy
+- Playback restrictions and regional availability rules
+- Geo-fencing rule management and enforcement contracts
+- Distribution auditability, observability, and failure handling
+
+## Future candidate — separate approval required
 
 ### Media processing and streaming delivery
 
@@ -21,7 +39,7 @@
 - Processing retries, observability, and failure recovery
 - OSS output publishing and CDN integration
 
-This work is not started and must not begin without explicit Module 4 approval.
+This work is not started and remains a separately governed roadmap candidate.
 
 ## Later candidates
 

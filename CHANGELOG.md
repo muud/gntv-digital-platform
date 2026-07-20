@@ -2,7 +2,7 @@
 
 All notable changes to GNTV DIGITAL are documented here.
 
-## [0.5.0] — 2026-07-19
+## [0.5.0] — 2026-07-20
 
 ### Added
 
@@ -20,7 +20,8 @@ All notable changes to GNTV DIGITAL are documented here.
 
 - 79 tests passed with 98.58% configured coverage.
 - MyPy reported zero errors across 87 source files.
-- Ruff, OpenAPI validation, Alembic head `202607131200`, and PostgreSQL Editorial lifecycle validation passed.
+- Ruff, OpenAPI 3.1 validation, Alembic single head `202607131200`, and PostgreSQL Editorial lifecycle validation passed.
+- Production-shaped configuration loaded successfully with external PostgreSQL, Redis, OSS, JWT, and media-signing values; real deployment secrets remain environment-managed.
 - CMS Module 5 was not started and is outside this release.
 
 ## [0.4.0] — 2026-07-12
