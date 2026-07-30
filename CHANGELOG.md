@@ -2,6 +2,35 @@
 
 All notable changes to GNTV DIGITAL are documented here.
 
+## [0.6.0-rc1] — 2026-07-30
+
+### Added
+
+- Module 5 streaming and distribution domain foundation with live channels, events, stream keys, streams, recordings, playback sessions, transcoding jobs, manifests, thumbnails, distribution targets, and geo-fencing policies.
+- RTMP/RTMPS and SRT ingest admission with gateway authentication, HMAC stream-key verification, CIDR checks, Redis leases, single-publisher coordination, lifecycle state enforcement, heartbeats, and health telemetry.
+- Media processing orchestration with FFprobe inspection, safe FFmpeg command construction and execution boundaries, CPU rendition profiles, HLS and MPEG-DASH packaging, manifest validation, publication, thumbnail generation, retries, cancellation, telemetry, and processing APIs.
+- Distribution target management, fail-closed playback authorization, geo-fencing enforcement, recording workflows, and signed playback controls.
+- Editorial ElevenLabs text-to-speech voice discovery and MP3 generation with sanitized provider failures.
+- Sheeko Xariiro multilingual production workflows for Afar, Amharic, Oromo, Somali, and Swahili, including scripts, review gates, voice presets, generated or uploaded audio, subtitle export, and generation audits.
+- Frontend Processing Operations Center and Sheeko Xariiro Voice Studio surfaces.
+- Alembic revisions `202607211200`, `202607241900`, and `202607291700`.
+- Frontend TypeScript no-emit validation tooling.
+
+### Security
+
+- Production and staging reject the default ingest gateway token.
+- Stream-key checks use one-way HMAC hashing and constant-time comparison.
+- Provider credentials stay in environment-backed secret settings and are never returned to clients.
+- Media paths, manifests, uploads, and command arguments are validated before worker execution.
+
+### Verification
+
+- 149 backend tests passed with 90.70% configured coverage.
+- MyPy reported zero issues across 132 source files.
+- Ruff passed for `app` and `tests`.
+- The frontend production build and `npx tsc --noEmit` passed; npm reported zero vulnerabilities.
+- Sprint 5.4 was not started and is outside this release candidate.
+
 ## [0.5.0] — 2026-07-20
 
 ### Added
@@ -59,3 +88,4 @@ All notable changes to GNTV DIGITAL are documented here.
 
 [0.4.0]: https://github.com/gntv-digital/platform/releases/tag/v0.4.0
 [0.5.0]: https://github.com/gntv-digital/platform/releases/tag/v0.5.0
+[0.6.0-rc1]: https://github.com/gntv-digital/platform/releases/tag/v0.6.0-rc1

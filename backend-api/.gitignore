@@ -1,0 +1,17 @@
+# Git ignore for backend repository
+
+.env
+.env.local
+.env.production
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+coverage/
+Dist/
+build/
+*.log
+*.sqlite3
+.DS_Store
+.idea/
+.vscode/

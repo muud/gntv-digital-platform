@@ -120,6 +120,41 @@ Scheduling uses IANA timezone names. All date values must include a UTC offset a
 
 Notification rows are an outbox-style delivery interface. Channel values are `in_app`, `email`, and `webhook`; external delivery workers can set `delivered_at` after dispatch. Events cover assignments, mentions, state changes, review reminders, scheduled publication, successful publication, and publishing failures.
 
+## ElevenLabs text-to-speech
+
+Authenticated editorial users can list the voices available to the configured ElevenLabs account and generate downloadable MP3 narration. These endpoints require the same editorial write access used by other protected editorial mutations; public and read-only users cannot reach the upstream service.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/tts/voices` | Return a sanitized list of available account voices |
+| `POST` | `/tts/speech` | Generate and stream a downloadable MP3 |
+
+The full versioned paths are `/api/v1/editorial/tts/voices` and `/api/v1/editorial/tts/speech`.
+
+Speech request:
+
+```json
+{
+  "text": "Tonight on GNTV Digital.",
+  "voice_id": "VOICE_ID_FROM_THE_VOICES_ENDPOINT",
+  "model_id": "eleven_multilingual_v2",
+  "output_format": "mp3_44100_128"
+}
+```
+
+`model_id` and `output_format` are optional. Their defaults are `eleven_multilingual_v2` and `mp3_44100_128`. Text is trimmed, must contain 1–5,000 characters, and voice identifiers cannot be empty. Only the documented MP3 output formats are accepted. Successful synthesis returns `audio/mpeg`, a generated `.mp3` attachment filename, and `Cache-Control: no-store`.
+
+The integration reads `ELEVENLABS_API_KEY` through the existing Pydantic settings object and sends it only in ElevenLabs' `xi-api-key` request header. The credential is never returned to API clients. If it is missing, the API returns `503 tts_not_configured` without making an upstream request.
+
+Safe provider error mappings include unavailable voice (`404`), insufficient credits (`402`), rate limit (`429`), provider authentication/access failure (`502`), timeout (`504`), and other upstream failures (`502`). Provider messages and request metadata are not forwarded.
+
+Official provider references:
+
+- [Create speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
+- [List voices](https://elevenlabs.io/docs/api-reference/legacy/voices/get-all)
+- [API authentication](https://elevenlabs.io/docs/api-reference/authentication)
+- [API errors](https://elevenlabs.io/docs/eleven-api/resources/errors)
+
 ## Error contract
 
 Errors use FastAPI's `detail` envelope:

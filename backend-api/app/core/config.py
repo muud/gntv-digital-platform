@@ -1,10 +1,15 @@
-from pydantic import Field, ValidationInfo, field_validator
+from typing import Self
+
+from pydantic import AliasChoices, Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     APP_NAME: str = "GNTV DIGITAL, ALL EVERYWHERE Backend API"
-    ENVIRONMENT: str = Field(default="development", validation_alias="ENVIRONMENT")
+    ENVIRONMENT: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "NODE_ENV"),
+    )
 
     POSTGRES_USER: str = Field(validation_alias="POSTGRES_USER")
     POSTGRES_PASSWORD: str = Field(validation_alias="POSTGRES_PASSWORD")
@@ -17,6 +22,33 @@ class Settings(BaseSettings):
     REDIS_PORT: int = Field(default=6379, validation_alias="REDIS_PORT")
     REDIS_URL: str | None = None
 
+    INGEST_GATEWAY_TOKEN: str = Field(
+        default="development-ingest-gateway-token",
+        min_length=24,
+        validation_alias="INGEST_GATEWAY_TOKEN",
+    )
+    INGEST_LEASE_TTL_SECONDS: int = Field(default=30, ge=10, le=300)
+    INGEST_ENCODER_TTL_SECONDS: int = Field(default=60, ge=15, le=600)
+    INGEST_KEY_CACHE_TTL_SECONDS: int = Field(default=30, ge=1, le=120)
+
+    FFMPEG_BINARY: str = Field(default="ffmpeg", validation_alias="FFMPEG_BINARY")
+    FFPROBE_BINARY: str = Field(default="ffprobe", validation_alias="FFPROBE_BINARY")
+    MEDIA_PROCESSING_WORKSPACE_ROOT: str = Field(
+        default="/tmp/gntv-transcode",
+        validation_alias="MEDIA_PROCESSING_WORKSPACE_ROOT",
+    )
+    MEDIA_PROCESSING_OUTPUT_ROOT: str = Field(
+        default="./var/streaming-media",
+        validation_alias="MEDIA_PROCESSING_OUTPUT_ROOT",
+    )
+    FFMPEG_TERMINATE_GRACE_SECONDS: float = Field(default=3.0, ge=0.1, le=30)
+    MEDIA_WORKER_LEASE_SECONDS: int = Field(default=30, ge=10, le=300)
+    MEDIA_TELEMETRY_TTL_SECONDS: int = Field(default=120, ge=30, le=3600)
+    MEDIA_GPU_WORKERS_ENABLED: bool = Field(
+        default=False,
+        validation_alias="MEDIA_GPU_WORKERS_ENABLED",
+    )
+
     JWT_SECRET_KEY: str = Field(default="super-secret-jwt-key", validation_alias="JWT_SECRET_KEY")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
@@ -25,6 +57,11 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = Field(default="no-reply@gntv.com", validation_alias="EMAIL_FROM")
     EMAIL_API_KEY: str = Field(default="", validation_alias="EMAIL_API_KEY")
     EMAIL_ENDPOINT: str = Field(default="https://dm.aliyuncs.com", validation_alias="EMAIL_ENDPOINT")
+
+    ELEVENLABS_API_KEY: SecretStr | None = Field(
+        default=None,
+        validation_alias="ELEVENLABS_API_KEY",
+    )
 
     OSS_BUCKET_NAME: str = Field(default="", validation_alias="OSS_BUCKET_NAME")
     OSS_ENDPOINT: str = Field(default="", validation_alias="OSS_ENDPOINT")
@@ -62,6 +99,15 @@ class Settings(BaseSettings):
             return value
         values = info.data
         return f"redis://{values.get('REDIS_HOST')}:{values.get('REDIS_PORT')}/0"
+
+    @model_validator(mode="after")
+    def reject_default_ingest_token_in_production(self) -> Self:
+        if (
+            self.ENVIRONMENT.lower() in {"production", "staging"}
+            and self.INGEST_GATEWAY_TOKEN == "development-ingest-gateway-token"
+        ):
+            raise ValueError("INGEST_GATEWAY_TOKEN must be configured outside development")
+        return self
 
 
 settings = Settings()  # type: ignore[call-arg]

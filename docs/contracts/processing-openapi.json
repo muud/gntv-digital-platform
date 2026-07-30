@@ -1,0 +1,1969 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "GNTV DIGITAL Processing Operations Center API",
+    "version": "5.3",
+    "description": "Standalone contract exported from the currently registered FastAPI processing routes."
+  },
+  "paths": {
+    "/api/v1/processing/jobs": {
+      "post": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Create Job",
+        "operationId": "create_job_api_v1_processing_jobs_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessingJobCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingJobResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The requested processing operation conflicts with current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "List Jobs",
+        "operationId": "list_jobs_api_v1_processing_jobs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingJobPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Get Job",
+        "operationId": "get_job_api_v1_processing_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingJobResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested processing resource does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Cancel Job",
+        "operationId": "cancel_job_api_v1_processing_jobs__job_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingJobCancelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested processing resource does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The requested processing operation conflicts with current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing/workers": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Workers",
+        "operationId": "workers_api_v1_processing_workers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkerStatusResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Workers Api V1 Processing Workers Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/processing/queues": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Queues",
+        "operationId": "queues_api_v1_processing_queues_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueTelemetryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/processing/manifests": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Manifests",
+        "operationId": "manifests_api_v1_processing_manifests_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing/manifests/validate": {
+      "post": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Validate Manifest",
+        "operationId": "validate_manifest_api_v1_processing_manifests_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManifestValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestValidationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/processing/manifests/{manifest_id}": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Manifest",
+        "operationId": "manifest_api_v1_processing_manifests__manifest_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "manifest_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Manifest Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested processing resource does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing/thumbnails": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Thumbnails",
+        "operationId": "thumbnails_api_v1_processing_thumbnails_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThumbnailPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing/thumbnails/{thumbnail_id}": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Thumbnail",
+        "operationId": "thumbnail_api_v1_processing_thumbnails__thumbnail_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "thumbnail_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Thumbnail Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThumbnailStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested processing resource does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/processing/metrics": {
+      "get": {
+        "tags": [
+          "Processing Operations Center"
+        ],
+        "summary": "Metrics",
+        "operationId": "metrics_api_v1_processing_metrics_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer access token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated user lacks the required processing permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ManifestFormat": {
+        "type": "string",
+        "enum": [
+          "hls",
+          "dash"
+        ],
+        "title": "ManifestFormat"
+      },
+      "ManifestKind": {
+        "type": "string",
+        "enum": [
+          "live",
+          "event",
+          "vod"
+        ],
+        "title": "ManifestKind"
+      },
+      "ManifestPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManifestStatusResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ManifestPage"
+      },
+      "ManifestStatus": {
+        "type": "string",
+        "enum": [
+          "building",
+          "ready",
+          "stale",
+          "revoked",
+          "failed"
+        ],
+        "title": "ManifestStatus"
+      },
+      "ManifestStatusResponse": {
+        "properties": {
+          "manifest_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Manifest Id"
+          },
+          "stream_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Id"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ManifestFormat"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ManifestKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ManifestStatus"
+          },
+          "manifest_path": {
+            "type": "string",
+            "title": "Manifest Path"
+          },
+          "generation": {
+            "type": "integer",
+            "title": "Generation"
+          },
+          "renditions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Renditions"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "manifest_id",
+          "stream_id",
+          "recording_id",
+          "format",
+          "kind",
+          "status",
+          "manifest_path",
+          "generation",
+          "renditions",
+          "published_at"
+        ],
+        "title": "ManifestStatusResponse"
+      },
+      "ManifestValidationRequest": {
+        "properties": {
+          "manifest_url": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Manifest Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "manifest_url"
+        ],
+        "title": "ManifestValidationRequest"
+      },
+      "ManifestValidationResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManifestFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conformance": {
+            "type": "string",
+            "title": "Conformance"
+          },
+          "validations": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Validations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "valid",
+          "format",
+          "conformance",
+          "validations"
+        ],
+        "title": "ManifestValidationResponse"
+      },
+      "MetricsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessingMetricsResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "MetricsPage"
+      },
+      "ProcessingErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "processing_not_found",
+              "processing_conflict"
+            ],
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ProcessingErrorDetail"
+      },
+      "ProcessingErrorResponse": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/ProcessingErrorDetail"
+              },
+              {
+                "$ref": "#/components/schemas/ProcessingForbiddenDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ProcessingErrorResponse"
+      },
+      "ProcessingForbiddenDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "streaming_forbidden",
+            "title": "Code"
+          },
+          "required_scope": {
+            "type": "string",
+            "enum": [
+              "channel:read-operations",
+              "stream:control"
+            ],
+            "title": "Required Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "required_scope"
+        ],
+        "title": "ProcessingForbiddenDetail"
+      },
+      "ProcessingJobCancelResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "const": "CANCELLED",
+            "title": "Status"
+          },
+          "terminated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Terminated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "terminated_at"
+        ],
+        "title": "ProcessingJobCancelResponse"
+      },
+      "ProcessingJobCreateRequest": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          },
+          "job_type": {
+            "type": "string",
+            "enum": [
+              "vod_transcode",
+              "live_transcode",
+              "manifest",
+              "thumbnail"
+            ],
+            "title": "Job Type"
+          },
+          "input_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Input Url"
+          },
+          "output_prefix": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Output Prefix"
+          },
+          "renditions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "1080p",
+                "720p",
+                "480p"
+              ]
+            },
+            "type": "array",
+            "title": "Renditions",
+            "default": [
+              "1080p",
+              "720p",
+              "480p"
+            ]
+          },
+          "queue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "transcode-cpu",
+                  "transcode-accelerated",
+                  "manifest",
+                  "thumbnail"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue"
+          },
+          "stream_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Id"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Max Attempts",
+            "default": 3
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "default": 900
+          },
+          "workspace": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace"
+          },
+          "thumbnail_kinds": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "poster",
+                "preview",
+                "timeline"
+              ]
+            },
+            "type": "array",
+            "title": "Thumbnail Kinds",
+            "default": [
+              "poster",
+              "preview",
+              "timeline"
+            ]
+          },
+          "thumbnail_interval_seconds": {
+            "type": "integer",
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Thumbnail Interval Seconds",
+            "default": 10
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "job_type",
+          "input_url",
+          "output_prefix"
+        ],
+        "title": "ProcessingJobCreateRequest"
+      },
+      "ProcessingJobPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessingJobResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ProcessingJobPage"
+      },
+      "ProcessingJobResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "job_type": {
+            "type": "string",
+            "enum": [
+              "vod_transcode",
+              "live_transcode",
+              "manifest",
+              "thumbnail"
+            ],
+            "title": "Job Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "queue": {
+            "type": "string",
+            "title": "Queue"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "max_attempts": {
+            "type": "integer",
+            "title": "Max Attempts"
+          },
+          "progress": {
+            "type": "number",
+            "title": "Progress"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metrics"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Id"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "job_type",
+          "status",
+          "queue",
+          "attempt",
+          "max_attempts",
+          "progress",
+          "metrics",
+          "worker_id",
+          "error_code",
+          "error_detail",
+          "created_at",
+          "started_at",
+          "completed_at"
+        ],
+        "title": "ProcessingJobResponse"
+      },
+      "ProcessingMetricsResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "queue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue"
+          },
+          "processing_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processing Duration Seconds"
+          },
+          "queue_wait_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Wait Time Seconds"
+          },
+          "encoding_fps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding Fps"
+          },
+          "encoding_speed_factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encoding Speed Factor"
+          },
+          "cpu_usage_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Usage Percent"
+          },
+          "dropped_frames": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped Frames"
+          },
+          "manifest_freshness_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manifest Freshness Seconds"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "ProcessingMetricsResponse"
+      },
+      "QueueStatus": {
+        "properties": {
+          "messages_queued": {
+            "type": "integer",
+            "title": "Messages Queued"
+          },
+          "messages_leased": {
+            "type": "integer",
+            "title": "Messages Leased"
+          },
+          "messages_running": {
+            "type": "integer",
+            "title": "Messages Running"
+          },
+          "messages_retrying": {
+            "type": "integer",
+            "title": "Messages Retrying"
+          },
+          "active_workers": {
+            "type": "integer",
+            "title": "Active Workers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "messages_queued",
+          "messages_leased",
+          "messages_running",
+          "messages_retrying",
+          "active_workers"
+        ],
+        "title": "QueueStatus"
+      },
+      "QueueTelemetryResponse": {
+        "properties": {
+          "broker": {
+            "type": "string",
+            "title": "Broker"
+          },
+          "queues": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/QueueStatus"
+            },
+            "type": "object",
+            "title": "Queues"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "broker",
+          "queues"
+        ],
+        "title": "QueueTelemetryResponse"
+      },
+      "ThumbnailKind": {
+        "type": "string",
+        "enum": [
+          "poster",
+          "keyframe",
+          "sprite",
+          "preview"
+        ],
+        "title": "ThumbnailKind"
+      },
+      "ThumbnailPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ThumbnailStatusResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ThumbnailPage"
+      },
+      "ThumbnailStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "ready",
+          "failed",
+          "deleted"
+        ],
+        "title": "ThumbnailStatus"
+      },
+      "ThumbnailStatusResponse": {
+        "properties": {
+          "thumbnail_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Thumbnail Id"
+          },
+          "stream_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Id"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id"
+          },
+          "media_file_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media File Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ThumbnailKind"
+          },
+          "timestamp_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp Ms"
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ThumbnailStatus"
+          },
+          "asset_path": {
+            "type": "string",
+            "title": "Asset Path"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "thumbnail_id",
+          "stream_id",
+          "recording_id",
+          "media_file_id",
+          "kind",
+          "timestamp_ms",
+          "width",
+          "height",
+          "status",
+          "asset_path"
+        ],
+        "title": "ThumbnailStatusResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WorkerHardware": {
+        "properties": {
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          },
+          "cpu_usage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Usage Pct"
+          },
+          "gpu_usage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Usage Pct"
+          },
+          "vram_allocated_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vram Allocated Mb"
+          },
+          "temperature_celsius": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Celsius"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "WorkerHardware"
+      },
+      "WorkerStatusResponse": {
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "title": "Worker Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "queue": {
+            "type": "string",
+            "title": "Queue"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "last_heartbeat": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Heartbeat"
+          },
+          "hardware": {
+            "$ref": "#/components/schemas/WorkerHardware"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "worker_id",
+          "queue",
+          "status",
+          "healthy",
+          "last_heartbeat"
+        ],
+        "title": "WorkerStatusResponse"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Processing Operations Center"
+    }
+  ]
+}
