@@ -1,36 +1,40 @@
-# Project Status — GNTV DIGITAL v0.4.0
+# Project Status — GNTV DIGITAL v0.6.0-rc1
 
-Overall status: **RELEASE READY**  
-Date: 2026-07-12
+Overall status: **RELEASE CANDIDATE**
+Date: 2026-07-30
 
-## Completed milestones
+## Completed release scope
 
-- [x] Platform foundation
-- [x] Authentication and authorization
-- [x] CMS Module 1 — Content Core
-- [x] CMS Module 2 — Media Library
-- [x] CMS Module 3 — Premium Streaming Catalog Engine
-- [x] Module 2 and Module 3 local E2E validation
-- [x] PostgreSQL migrations through `202607121200`
-- [x] OpenAPI, typing, lint, test, and coverage gates
+- [x] Module 5 domain, contract, persistence, and permission foundation
+- [x] RTMP/RTMPS and SRT ingest admission, stream-key security, leases, heartbeats, and health telemetry
+- [x] Media probing, processing job orchestration, HLS/DASH packaging, manifest validation, publication, thumbnails, retries, and worker telemetry
+- [x] Distribution targets, playback authorization, geo-fencing policy enforcement, recordings, and playback session controls
+- [x] Editorial ElevenLabs text-to-speech integration with safe provider error handling
+- [x] Sheeko Xariiro multilingual voice workflow for Afar, Amharic, Oromo, Somali, and Swahili
+- [x] Processing Operations Center and Sheeko Xariiro Voice Studio frontend surfaces
+- [x] Alembic migrations through `202607291700`
+- [x] OpenAPI, typing, lint, test, coverage, build, and TypeScript gates
 
 ## Release evidence
 
 | Gate | Result |
 |---|---|
-| PyTest | 73 passed |
-| Coverage | 98.58% |
-| MyPy | Zero errors, 65 files |
+| PyTest | 149 passed |
+| Coverage | 90.70% |
+| MyPy | Zero issues across 132 source files |
 | Ruff | Passed |
-| OpenAPI | Passed |
-| PostgreSQL | Migration and ORM round-trips passed |
-| Module 2 E2E | Completed |
-| Module 3 E2E | PASS |
+| Frontend production build | Passed with Vite 8.2.0 |
+| TypeScript | `npx tsc --noEmit` passed |
+| npm audit | Zero vulnerabilities |
+| Release exclusions | Local environments, logs, IDE files, dependencies, build outputs, and caches excluded |
 
 ## Current constraints
 
-- Transcoding and adaptive streaming are intentionally absent.
-- OSS credentials, production buckets, JWT secrets, database credentials, and CDN settings must be supplied through deployment environments.
-- Existing deprecation warnings should be addressed before future major dependency upgrades but do not block v0.4.0.
+- Media binaries and GPU execution remain isolated to approved worker environments; API processes dispatch work and do not perform heavy media processing.
+- Sprint 5.3 defaults to CPU workers. GPU workers require an approved image and explicit `MEDIA_GPU_WORKERS_ENABLED=true`.
+- Production ingest tokens, ElevenLabs credentials, databases, Redis, object storage, CDN signing secrets, and KMS configuration must be supplied through deployment environments.
+- The test suite reports dependency deprecation warnings which do not block this release candidate.
 
-The next module requires separate authorization and is not part of this release.
+## Release boundary
+
+Module 5 is packaged as `v0.6.0-rc1` for release-candidate evaluation. Sprint 5.4 has not been started and is outside this release.

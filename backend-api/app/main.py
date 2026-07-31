@@ -11,6 +11,13 @@ from app.modules.cms.api import content_router
 from app.modules.cms.media.api import download_router as media_download_router
 from app.modules.cms.media.api import router as media_router
 from app.modules.catalog.api import router as catalog_router
+from app.modules.editorial.api import router as editorial_router
+from app.modules.editorial.tts.api import router as editorial_tts_router
+from app.modules.distribution.api import router as distribution_router
+from app.modules.streaming.api import router as streaming_router
+from app.modules.streaming.api.ingest_router import router as ingest_router
+from app.modules.streaming.processing.api import router as processing_router
+from app.modules.sheeko_xariiro.api import router as sheeko_xariiro_router
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -30,3 +37,10 @@ app.include_router(content_router)
 app.include_router(media_router)
 app.include_router(media_download_router)
 app.include_router(catalog_router)
+app.include_router(editorial_router)
+app.include_router(editorial_tts_router)
+app.include_router(streaming_router)
+app.include_router(ingest_router)
+app.include_router(processing_router)
+app.include_router(distribution_router)
+app.include_router(sheeko_xariiro_router)
