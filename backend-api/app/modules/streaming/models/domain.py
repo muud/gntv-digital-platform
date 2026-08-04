@@ -203,10 +203,18 @@ class LiveChannel(Base, TimestampVersionMixin):
     )
     primary_ingest_host: Mapped[str | None] = mapped_column(String(500))
     backup_ingest_host: Mapped[str | None] = mapped_column(String(500))
+    dvr_window_seconds: Mapped[int] = mapped_column(Integer, default=7200, nullable=False)
+    catchup_retention_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    dvr_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     updated_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
     __table_args__ = (
+        CheckConstraint("dvr_window_seconds >= 0", name="ck_live_channels_dvr_window"),
+        CheckConstraint(
+            "catchup_retention_days >= 0",
+            name="ck_live_channels_catchup_retention",
+        ),
         Index("idx_live_channels_status", "status"),
         Index("idx_live_channels_catalog", "catalog_item_id"),
     )
@@ -339,6 +347,9 @@ class Recording(Base, TimestampVersionMixin):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    start_sequence_number: Mapped[int | None] = mapped_column(BigInteger)
+    end_sequence_number: Mapped[int | None] = mapped_column(BigInteger)
+    epg_event_id: Mapped[str | None] = mapped_column(String(160))
     failure_code: Mapped[str | None] = mapped_column(String(100))
     failure_detail: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
@@ -348,9 +359,66 @@ class Recording(Base, TimestampVersionMixin):
         CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_recording_duration"),
         CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="ck_recording_size"),
         CheckConstraint("ended_at IS NULL OR ended_at >= started_at", name="ck_recording_time_order"),
+        CheckConstraint(
+            "start_sequence_number IS NULL OR start_sequence_number >= 0",
+            name="ck_recording_start_sequence",
+        ),
+        CheckConstraint(
+            "end_sequence_number IS NULL OR end_sequence_number >= 0",
+            name="ck_recording_end_sequence",
+        ),
+        CheckConstraint(
+            "end_sequence_number IS NULL OR start_sequence_number IS NULL "
+            "OR end_sequence_number >= start_sequence_number",
+            name="ck_recording_sequence_order",
+        ),
         Index("idx_recordings_stream", "stream_id"),
         Index("idx_recordings_event", "live_event_id"),
+        Index("idx_recordings_epg_event", "epg_event_id"),
         Index("idx_recordings_status_ended", "status", "ended_at"),
+    )
+
+
+class DVRSegmentIndex(Base, TimestampVersionMixin):
+    __tablename__ = "dvr_segment_index"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    live_channel_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="CASCADE"), nullable=False
+    )
+    stream_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("streams.id", ondelete="SET NULL"))
+    live_event_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_events.id", ondelete="SET NULL")
+    )
+    recording_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("recordings.id", ondelete="SET NULL")
+    )
+    rendition: Mapped[str] = mapped_column(String(80), default="source", nullable=False)
+    sequence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    segment_uri: Mapped[str] = mapped_column(String(2048), nullable=False)
+    segment_start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    segment_end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    provider_event_id: Mapped[str | None] = mapped_column(String(200))
+    apsara_object_key: Mapped[str | None] = mapped_column(String(1024))
+    is_pruned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("sequence_number >= 0", name="ck_dvr_segment_sequence"),
+        CheckConstraint("duration_seconds > 0", name="ck_dvr_segment_duration"),
+        CheckConstraint("segment_end_at > segment_start_at", name="ck_dvr_segment_time_order"),
+        UniqueConstraint(
+            "live_channel_id",
+            "rendition",
+            "sequence_number",
+            name="uq_dvr_segment_channel_rendition_sequence",
+        ),
+        Index("idx_dvr_segment_channel_time", "live_channel_id", "segment_start_at"),
+        Index("idx_dvr_segment_channel_live_event", "live_channel_id", "live_event_id"),
+        Index("idx_dvr_segment_recording_sequence", "recording_id", "sequence_number"),
+        Index("idx_dvr_segment_provider_event", "provider_event_id"),
+        Index("idx_dvr_segment_prune", "live_channel_id", "segment_end_at", "is_pruned"),
     )
 
 
