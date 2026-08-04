@@ -25,6 +25,7 @@ from app.modules.streaming.models.domain import (
     TranscodingJob,
     TranscodingJobStatus,
     TranscodingJobType,
+    UserWatchHistory,
 )
 
 __all__ = [
@@ -52,4 +53,5 @@ __all__ = [
     "TranscodingJob",
     "TranscodingJobStatus",
     "TranscodingJobType",
+    "UserWatchHistory",
 ]

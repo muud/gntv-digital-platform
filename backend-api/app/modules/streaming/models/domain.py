@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -525,4 +526,34 @@ class Thumbnail(Base, TimestampVersionMixin):
         CheckConstraint("width > 0 AND height > 0", name="ck_thumbnail_dimensions"),
         Index("idx_thumbnail_recording_kind_time", "recording_id", "kind", "timestamp_ms"),
         Index("idx_thumbnail_stream", "stream_id"),
+    )
+
+
+class UserWatchHistory(Base, TimestampVersionMixin):
+    __tablename__ = "user_watch_history"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    playback_session_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("playback_sessions.id", ondelete="SET NULL")
+    )
+    live_channel_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="SET NULL")
+    )
+    recording_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("recordings.id", ondelete="SET NULL")
+    )
+    catalog_item_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("catalog_items.id", ondelete="SET NULL")
+    )
+    device_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    watch_duration_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    max_position_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    completion_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("watch_duration_ms >= 0", name="ck_watch_history_duration"),
+        CheckConstraint("max_position_ms >= 0", name="ck_watch_history_position"),
+        CheckConstraint("completion_ratio >= 0.0 AND completion_ratio <= 1.0", name="ck_watch_history_completion"),
+        Index("idx_watch_history_user_time", "user_id", "created_at"),
     )
