@@ -2,6 +2,7 @@
 
 from app.modules.streaming.models.domain import (
     ChannelStatus,
+    DVRSegmentIndex,
     LiveChannel,
     LiveEvent,
     LiveEventStatus,
@@ -30,6 +31,7 @@ from app.modules.streaming.models.domain import (
 
 __all__ = [
     "ChannelStatus",
+    "DVRSegmentIndex",
     "LiveChannel",
     "LiveEvent",
     "LiveEventStatus",

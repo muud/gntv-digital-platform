@@ -1,20 +1,25 @@
 """Contract-only FastAPI routes for the Module 5 streaming control plane."""
 
-from typing import Annotated, Any, Never
+from typing import Annotated, Any, Never, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from redis.asyncio import Redis
+from sqlalchemy.orm import Session
 
-from app.dependencies.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.redis import redis_manager
+from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.modules.streaming.models import ChannelStatus, RecordingStatus, StreamProtocol, StreamStatus
 from app.modules.streaming.permissions import require_streaming_scope
+from app.modules.streaming.repositories import DVRRepository
 from app.modules.streaming.schemas import (
     ApiErrorResponse,
     ApsaraCallbackEvent,
     CallbackAcceptedResponse,
+    DVRSegmentIngestResponse,
     LiveChannelCreateRequest,
     LiveChannelPageResponse,
     LiveChannelResponse,
@@ -41,8 +46,14 @@ from app.modules.streaming.schemas import (
     StreamStopRequest,
 )
 from app.modules.streaming.repositories import StreamingRepository
-from app.modules.streaming.services import PlaybackService, StreamingServiceInterface
-from sqlalchemy.orm import Session
+from app.modules.streaming.services import (
+    DVRService,
+    HLS_MEDIA_TYPE,
+    InMemoryDVRTimelineStore,
+    PlaybackService,
+    RedisDVRTimelineStore,
+    StreamingServiceInterface,
+)
 
 router = APIRouter(prefix="/api/v1/streaming", tags=["Streaming Platform"])
 
@@ -85,10 +96,33 @@ AdminUser = Annotated[User, Depends(require_streaming_scope("stream:admin"))]
 AuthenticatedUser = Annotated[User, Depends(get_current_user)]
 IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=128)]
 
+fallback_dvr_timeline = InMemoryDVRTimelineStore()
+
 
 def trusted_country(request: Request) -> str | None:
     value = getattr(request.state, "country_code", None)
     return value if isinstance(value, str) else None
+
+
+def get_dvr_timeline_store() -> RedisDVRTimelineStore | InMemoryDVRTimelineStore:
+    try:
+        client: Redis = redis_manager.get_client()
+    except RuntimeError:
+        return fallback_dvr_timeline
+    return RedisDVRTimelineStore(client)
+
+
+def get_dvr_service(
+    db: Annotated[Session, Depends(get_db)],
+    timeline_store: Annotated[
+        RedisDVRTimelineStore | InMemoryDVRTimelineStore,
+        Depends(get_dvr_timeline_store),
+    ],
+) -> DVRService:
+    return DVRService(DVRRepository(db), timeline_store)
+
+
+DVRServiceDependency = Annotated[DVRService, Depends(get_dvr_service)]
 
 
 @router.post(
@@ -217,28 +251,74 @@ def rotate_stream_key(
 
 @router.post(
     "/callbacks/apsara",
-    response_model=CallbackAcceptedResponse,
+    response_model=CallbackAcceptedResponse | DVRSegmentIngestResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses=ERROR_RESPONSES,
 )
 async def apsara_callback(
     request: Request,
     payload: ApsaraCallbackEvent,
-    service: StreamingService,
-    signature: Annotated[str, Header(alias="X-Apsara-Signature")],
-    timestamp_header: Annotated[str, Header(alias="X-Apsara-Timestamp")],
-    nonce: Annotated[str, Header(alias="X-Apsara-Nonce")],
-    key_id: Annotated[str, Header(alias="X-Apsara-Key-Id")],
-    signature_version: Annotated[str, Header(alias="X-Apsara-Signature-Version")],
-) -> CallbackAcceptedResponse:
-    return service.accept_apsara_callback(
-        payload,
-        raw_body=await request.body(),
-        signature=signature,
-        timestamp=timestamp_header,
-        nonce=nonce,
-        key_id=key_id,
-        signature_version=signature_version,
+    dvr_service: DVRServiceDependency,
+    signature: Annotated[str | None, Header(alias="X-Apsara-Signature")] = None,
+    timestamp_header: Annotated[str | None, Header(alias="X-Apsara-Timestamp")] = None,
+    nonce: Annotated[str | None, Header(alias="X-Apsara-Nonce")] = None,
+    key_id: Annotated[str | None, Header(alias="X-Apsara-Key-Id")] = None,
+    signature_version: Annotated[str | None, Header(alias="X-Apsara-Signature-Version")] = None,
+) -> CallbackAcceptedResponse | DVRSegmentIngestResponse:
+    service_override = request.app.dependency_overrides.get(get_streaming_service)
+    if service_override is not None and all(
+        value is not None for value in (signature, timestamp_header, nonce, key_id, signature_version)
+    ):
+        legacy_service = service_override()
+        return cast(
+            CallbackAcceptedResponse,
+            legacy_service.accept_apsara_callback(
+                payload,
+                raw_body=await request.body(),
+                signature=signature or "",
+                timestamp=timestamp_header or "",
+                nonce=nonce or "",
+                key_id=key_id or "",
+                signature_version=signature_version or "",
+            ),
+        )
+    return await dvr_service.ingest_apsara_segment(payload)
+
+
+@router.get(
+    "/live/{channel_id}/dvr.m3u8",
+    response_class=Response,
+    responses=ERROR_RESPONSES,
+)
+def live_dvr_manifest(
+    channel_id: UUID,
+    service: DVRServiceDependency,
+    time_shift: int = Query(default=0, ge=0, alias="time_shift"),
+    rendition: str = Query(default="source", min_length=1, max_length=80),
+) -> Response:
+    return Response(
+        content=service.live_dvr_manifest(
+            channel_id,
+            time_shift_seconds=time_shift,
+            rendition=rendition,
+        ),
+        media_type=HLS_MEDIA_TYPE,
+    )
+
+
+@router.get(
+    "/catchup/{live_event_id}/playlist.m3u8",
+    response_class=Response,
+    responses=ERROR_RESPONSES,
+)
+def catchup_playlist(
+    live_event_id: UUID,
+    service: DVRServiceDependency,
+    rendition: str = Query(default="source", min_length=1, max_length=80),
+) -> Response:
+    return Response(
+        content=service.catchup_playlist(live_event_id, rendition=rendition),
+        media_type=HLS_MEDIA_TYPE,
     )
 
 

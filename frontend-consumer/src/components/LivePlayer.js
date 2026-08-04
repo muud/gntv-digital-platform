@@ -4,6 +4,7 @@ import { CHANNELS } from "../../../shared/src/utils/mockData.js";
 const MAX_RETRIES = 3;
 const NON_RETRYABLE_STATUSES = new Set([400, 403, 404]);
 const HLS_MIME_TYPE = "application/vnd.apple.mpegurl";
+const DVR_WINDOW_SECONDS = 30 * 60;
 
 class PlaybackError extends Error {
   constructor(message, { status = null, retryable = true } = {}) {
@@ -81,6 +82,52 @@ function errorMessageForStatus(status) {
   return "The playback service is temporarily unavailable.";
 }
 
+export function LiveBadge(label = "LIVE") {
+  return `
+    <div class="live-badge" id="player-live-badge">
+      <span class="pulse-red-ring"></span>
+      <span class="live-label">${label}</span>
+    </div>
+  `;
+}
+
+export function DVRTimelineBar() {
+  return `
+    <div class="dvr-timeline-bar" aria-label="DVR timeline">
+      <span class="dvr-edge-label">-${Math.round(DVR_WINDOW_SECONDS / 60)}m</span>
+      <input
+        type="range"
+        id="slider-dvr-timeline"
+        min="0"
+        max="${DVR_WINDOW_SECONDS}"
+        value="0"
+        step="6"
+        aria-label="Time-shift seek"
+      >
+      <span class="dvr-edge-label">LIVE</span>
+    </div>
+  `;
+}
+
+export function DVRControlsOverlay() {
+  return `
+    <div class="dvr-controls-overlay" id="dvr-controls-overlay">
+      ${DVRTimelineBar()}
+      <div class="dvr-actions">
+        <button class="dvr-chip" id="btn-dvr-minus-30" type="button">-30s</button>
+        <button class="dvr-chip" id="btn-dvr-minus-5m" type="button">-5m</button>
+        <button class="dvr-chip dvr-live" id="btn-go-live" type="button">Go Live</button>
+        <button class="dvr-chip" id="btn-catchup" type="button">Catch-up</button>
+      </div>
+      <span class="dvr-readout" id="dvr-readout">Live edge</span>
+    </div>
+  `;
+}
+
+export function LiveDVRPlayer(container) {
+  return initLivePlayer(container);
+}
+
 export function initLivePlayer(container) {
   container.innerHTML = `
     <div class="player-container glass-card">
@@ -89,10 +136,7 @@ export function initLivePlayer(container) {
 
         <div class="player-hud">
           <div class="hud-top">
-            <div class="live-badge">
-              <span class="pulse-red-ring"></span>
-              <span class="live-label">LIVE</span>
-            </div>
+            ${LiveBadge()}
             <div class="hud-channel-info">
               <span id="player-channel-logo">🌐</span>
               <span id="player-channel-name">GNTV DIGITAL, ALL EVERYWHERE News Global</span>
@@ -127,6 +171,7 @@ export function initLivePlayer(container) {
             <p id="player-emergency-msg">BROADCAST SIGNAL OVERRIDE ACTIVATED</p>
           </div>
         </div>
+        ${DVRControlsOverlay()}
       </div>
 
       <div class="player-controls">
@@ -181,6 +226,13 @@ export function initLivePlayer(container) {
   const manifestType = container.querySelector("#hud-manifest-type");
   const tickerContainer = container.querySelector("#marquee-ticker");
   const channelButtons = container.querySelectorAll(".channel-btn");
+  const liveBadgeLabel = container.querySelector("#player-live-badge .live-label");
+  const dvrSlider = container.querySelector("#slider-dvr-timeline");
+  const dvrReadout = container.querySelector("#dvr-readout");
+  const dvrMinus30 = container.querySelector("#btn-dvr-minus-30");
+  const dvrMinus5m = container.querySelector("#btn-dvr-minus-5m");
+  const goLiveBtn = container.querySelector("#btn-go-live");
+  const catchupBtn = container.querySelector("#btn-catchup");
 
   let abortController = null;
   let hls = null;
@@ -190,6 +242,10 @@ export function initLivePlayer(container) {
   let loadGeneration = 0;
   let mediaGeneration = 0;
   let destroyed = false;
+  let activeSessionId = null;
+  let activeChannel = null;
+  let activeTimeShift = 0;
+  let dvrMode = "live";
 
   const setLoading = (visible, message = "SECURING LIVE DOWNLINK…") => {
     loadingMessage.textContent = message;
@@ -210,6 +266,21 @@ export function initLivePlayer(container) {
     retryBtn.hidden = false;
     retryBtn.disabled = false;
     retryBtn.textContent = "RETRY NOW";
+  };
+
+  const formatShift = seconds => {
+    if (seconds <= 0) return "Live edge";
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    if (minutes === 0) return `${remainder}s behind live`;
+    return `${minutes}m ${remainder}s behind live`;
+  };
+
+  const updateDVRUI = () => {
+    dvrSlider.value = String(activeTimeShift);
+    dvrReadout.textContent = dvrMode === "catchup" ? "Catch-up playback" : formatShift(activeTimeShift);
+    liveBadgeLabel.textContent = activeTimeShift === 0 && dvrMode === "live" ? "LIVE" : "DVR";
+    goLiveBtn.disabled = activeTimeShift === 0 && dvrMode === "live";
   };
 
   const updateMuteControl = () => {
@@ -271,6 +342,34 @@ export function initLivePlayer(container) {
     hls.loadSource(contract.playback_url);
     hls.attachMedia(video);
   };
+
+  async function requestManifestPlayback(url, generation, modeLabel) {
+    if (destroyed || generation !== loadGeneration) return;
+    abortController?.abort();
+    abortController = new AbortController();
+    clearError();
+    setLoading(true, modeLabel === "catchup" ? "OPENING CATCH-UP PLAYLIST…" : "TUNING DVR WINDOW…");
+    activeSessionId = null;
+
+    try {
+      await beginPlayback(
+        {
+          playback_url: url,
+          playback_mode: modeLabel === "catchup" ? "vod" : "live",
+          manifest_type: "hls",
+        },
+        generation,
+      );
+      if (destroyed || generation !== loadGeneration) return;
+      playPauseBtn.disabled = false;
+      await video.play().catch(() => {
+        playPauseBtn.textContent = "▶️";
+        playPauseBtn.setAttribute("aria-label", "Play");
+      });
+    } catch (error) {
+      handleFailure(error, generation);
+    }
+  }
 
   const scheduleRetry = generation => {
     if (retryCount >= MAX_RETRIES) {
@@ -362,7 +461,39 @@ export function initLivePlayer(container) {
       setError("No playback target was selected.");
       return;
     }
+    activeTimeShift = 0;
+    dvrMode = "live";
+    updateDVRUI();
     void requestPlayback(activeTargetId, generation);
+  };
+
+  const loadDVRShift = seconds => {
+    if (!activeTargetId) return;
+    loadGeneration += 1;
+    const generation = loadGeneration;
+    activeTimeShift = Math.min(DVR_WINDOW_SECONDS, Math.max(0, seconds));
+    dvrMode = "live";
+    updateDVRUI();
+    const apiBase = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");
+    const endpoint = new URL(
+      `${apiBase}/api/v1/streaming/live/${encodeURIComponent(activeTargetId)}/dvr.m3u8`,
+    );
+    endpoint.searchParams.set("time_shift", String(activeTimeShift));
+    void requestManifestPlayback(endpoint.href, generation, "dvr");
+  };
+
+  const loadCatchup = () => {
+    const eventId = activeChannel?.liveEventId || activeChannel?.catchupEventId || activeTargetId;
+    if (!eventId) return;
+    loadGeneration += 1;
+    const generation = loadGeneration;
+    dvrMode = "catchup";
+    updateDVRUI();
+    const apiBase = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");
+    const endpoint = new URL(
+      `${apiBase}/api/v1/streaming/catchup/${encodeURIComponent(eventId)}/playlist.m3u8`,
+    );
+    void requestManifestPlayback(endpoint.href, generation, "catchup");
   };
 
   playPauseBtn.addEventListener("click", () => {
@@ -402,6 +533,29 @@ export function initLivePlayer(container) {
     void requestPlayback(activeTargetId, loadGeneration);
   });
 
+  dvrSlider.addEventListener("input", event => {
+    activeTimeShift = Number(event.target.value);
+    dvrReadout.textContent = formatShift(activeTimeShift);
+  });
+
+  dvrSlider.addEventListener("change", event => {
+    loadDVRShift(Number(event.target.value));
+  });
+
+  dvrMinus30.addEventListener("click", () => {
+    loadDVRShift(activeTimeShift + 30);
+  });
+
+  dvrMinus5m.addEventListener("click", () => {
+    loadDVRShift(activeTimeShift + 300);
+  });
+
+  goLiveBtn.addEventListener("click", () => {
+    if (activeTargetId) loadContent(activeTargetId);
+  });
+
+  catchupBtn.addEventListener("click", loadCatchup);
+
   video.addEventListener("loadstart", () => setLoading(true));
   video.addEventListener("waiting", () => setLoading(true, "BUFFERING BROADCAST…"));
   video.addEventListener("canplay", () => setLoading(false));
@@ -438,6 +592,7 @@ export function initLivePlayer(container) {
 
   const unsubChannel = store.subscribe("activeChannel", channel => {
     if (!channel) return;
+    activeChannel = channel;
     channelLogo.textContent = channel.logo;
     channelName.textContent = channel.name;
     channelButtons.forEach(button => {
@@ -457,8 +612,6 @@ export function initLivePlayer(container) {
     emergencyOverlay.classList.toggle("active", Boolean(alertState?.active));
     emergencyMsg.textContent = alertState?.message || "BROADCAST OVERRIDE ACTIVATED";
   });
-
-  let activeSessionId = null;
 
   const heartbeatInterval = window.setInterval(async () => {
     if (!video.paused && activeSessionId) {

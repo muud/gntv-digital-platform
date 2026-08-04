@@ -62,6 +62,9 @@ class LiveChannelCreateRequest(ContractModel):
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
     primary_ingest_host: str | None = Field(default=None, max_length=500)
     backup_ingest_host: str | None = Field(default=None, max_length=500)
+    dvr_window_seconds: int = Field(default=7200, ge=0, le=604800)
+    catchup_retention_days: int = Field(default=7, ge=0, le=365)
+    dvr_enabled: bool = False
 
     @field_validator("timezone")
     @classmethod
@@ -95,6 +98,9 @@ class LiveChannelResponse(ContractModel):
     current_event_id: UUID | None
     primary_ingest_host: str | None
     backup_ingest_host: str | None
+    dvr_window_seconds: int = 7200
+    catchup_retention_days: int = 7
+    dvr_enabled: bool = False
     created_at: datetime
     updated_at: datetime
     lock_version: int
@@ -228,6 +234,16 @@ class ApsaraCallbackEvent(ContractModel):
     stream_identifier: str = Field(min_length=1, max_length=255)
     payload_version: str = Field(min_length=1, max_length=20)
     recording_object_key: str | None = Field(default=None, max_length=1024)
+    live_channel_id: UUID | None = None
+    live_event_id: UUID | None = None
+    stream_id: UUID | None = None
+    recording_id: UUID | None = None
+    segment_uri: str | None = Field(default=None, max_length=2048)
+    sequence_number: int | None = Field(default=None, ge=0)
+    segment_start_at: datetime | None = None
+    segment_end_at: datetime | None = None
+    duration_seconds: float | None = Field(default=None, gt=0)
+    rendition: str = Field(default="source", min_length=1, max_length=80)
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -350,6 +366,9 @@ class RecordingResponse(ContractModel):
     started_at: datetime
     ended_at: datetime | None
     retention_until: datetime | None
+    start_sequence_number: int | None = None
+    end_sequence_number: int | None = None
+    epg_event_id: str | None = None
     created_at: datetime
     updated_at: datetime
     lock_version: int
@@ -402,3 +421,28 @@ class ThumbnailResponse(ContractModel):
     width: int
     height: int
     status: ThumbnailStatus
+
+
+class DVRSegmentResponse(ContractModel):
+    id: UUID
+    live_channel_id: UUID
+    stream_id: UUID | None
+    live_event_id: UUID | None
+    recording_id: UUID | None
+    rendition: str
+    sequence_number: int
+    segment_uri: str
+    segment_start_at: datetime
+    segment_end_at: datetime
+    duration_seconds: float
+    provider_event_id: str | None
+    apsara_object_key: str | None
+    is_pruned: bool
+    metadata_json: dict[str, Any]
+
+
+class DVRSegmentIngestResponse(ContractModel):
+    provider_event_id: str
+    idempotency_outcome: Literal["accepted", "duplicate"]
+    correlation_id: str
+    segment: DVRSegmentResponse
