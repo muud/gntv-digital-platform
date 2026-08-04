@@ -6,6 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from app.dependencies.auth import get_current_user
+from app.core.config import settings
+from app.core.database import get_db
 from app.models.user import User
 from app.modules.streaming.models import ChannelStatus, RecordingStatus, StreamProtocol, StreamStatus
 from app.modules.streaming.permissions import require_streaming_scope
@@ -17,7 +19,14 @@ from app.modules.streaming.schemas import (
     LiveChannelPageResponse,
     LiveChannelResponse,
     PlaybackAuthorizationResponse,
+    PlaybackHeartbeatRequest,
+    PlaybackHeartbeatResponse,
+    PlaybackPathValidationResponse,
     PlaybackResolveQuery,
+    PlaybackRevokeRequest,
+    PlaybackRevokeResponse,
+    PlaybackStopRequest,
+    PlaybackStopResponse,
     PlaybackTokenRequest,
     PlaybackTokenResponse,
     RecordingPageResponse,
@@ -31,7 +40,9 @@ from app.modules.streaming.schemas import (
     StreamStartRequest,
     StreamStopRequest,
 )
-from app.modules.streaming.services import StreamingServiceInterface
+from app.modules.streaming.repositories import StreamingRepository
+from app.modules.streaming.services import PlaybackService, StreamingServiceInterface
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/v1/streaming", tags=["Streaming Platform"])
 
@@ -54,6 +65,18 @@ def get_streaming_service() -> Never:
 
 
 StreamingService = Annotated[StreamingServiceInterface, Depends(get_streaming_service)]
+
+
+def get_playback_service(db: Annotated[Session, Depends(get_db)]) -> PlaybackService:
+    return PlaybackService(
+        StreamingRepository(db),
+        signing_secret=settings.PLAYBACK_SIGNING_SECRET.get_secret_value(),
+        token_ttl_seconds=settings.PLAYBACK_TOKEN_TTL_SECONDS,
+        public_base_url=settings.PLAYBACK_PUBLIC_BASE_URL,
+    )
+
+
+PlaybackServiceDependency = Annotated[PlaybackService, Depends(get_playback_service)]
 CreateUser = Annotated[User, Depends(require_streaming_scope("stream:create"))]
 ReadUser = Annotated[User, Depends(require_streaming_scope("stream:read"))]
 WriteUser = Annotated[User, Depends(require_streaming_scope("stream:write"))]
@@ -219,11 +242,33 @@ async def apsara_callback(
     )
 
 
+@router.get(
+    "/playback/validate",
+    response_model=PlaybackPathValidationResponse,
+    responses=ERROR_RESPONSES,
+)
+def validate_playback_path(
+    service: PlaybackServiceDependency,
+    path: str = Query(min_length=1, max_length=1024),
+    exp: str = Query(min_length=1, max_length=20),
+    session_id: str = Query(min_length=1, max_length=36),
+    pv: str = Query(min_length=1, max_length=10),
+    sig: str = Query(min_length=1, max_length=128),
+) -> PlaybackPathValidationResponse:
+    return service.validate_path(
+        path,
+        expires_at=exp,
+        session_id=session_id,
+        policy_version=pv,
+        signature=sig,
+    )
+
+
 @router.get("/playback/{target_id}", response_model=PlaybackAuthorizationResponse, responses=ERROR_RESPONSES)
 def resolve_playback(
     target_id: UUID,
     request: Request,
-    service: StreamingService,
+    service: PlaybackServiceDependency,
     device_id: str = Query(min_length=1, max_length=160),
     protocol: str | None = Query(default=None, pattern="^(hls|dash)$"),
 ) -> PlaybackAuthorizationResponse:
@@ -246,13 +291,52 @@ def issue_playback_token(
     payload: PlaybackTokenRequest,
     request: Request,
     user: AuthenticatedUser,
-    service: StreamingService,
+    service: PlaybackServiceDependency,
 ) -> PlaybackTokenResponse:
     return service.issue_playback_token(
         payload,
         user_id=user.id,
         trusted_country_code=trusted_country(request),
     )
+
+
+@router.post(
+    "/playback/{session_id}/heartbeat",
+    response_model=PlaybackHeartbeatResponse,
+    responses=ERROR_RESPONSES,
+)
+def playback_heartbeat(
+    session_id: UUID,
+    payload: PlaybackHeartbeatRequest,
+    service: PlaybackServiceDependency,
+) -> PlaybackHeartbeatResponse:
+    return service.heartbeat(session_id, payload)
+
+
+@router.post(
+    "/playback/{session_id}/stop",
+    response_model=PlaybackStopResponse,
+    responses=ERROR_RESPONSES,
+)
+def stop_playback_session(
+    session_id: UUID,
+    payload: PlaybackStopRequest,
+    service: PlaybackServiceDependency,
+) -> PlaybackStopResponse:
+    return service.stop_session(session_id, payload)
+
+
+@router.post(
+    "/playback/{session_id}/revoke",
+    response_model=PlaybackRevokeResponse,
+    responses=ERROR_RESPONSES,
+)
+def revoke_playback_session(
+    session_id: UUID,
+    payload: PlaybackRevokeRequest,
+    service: PlaybackServiceDependency,
+) -> PlaybackRevokeResponse:
+    return service.revoke_session(session_id, payload)
 
 
 @router.get("/recordings", response_model=RecordingPageResponse, responses=ERROR_RESPONSES)
@@ -274,4 +358,4 @@ def list_recordings(
     )
 
 
-__all__ = ["get_streaming_service", "router"]
+__all__ = ["get_playback_service", "get_streaming_service", "router"]

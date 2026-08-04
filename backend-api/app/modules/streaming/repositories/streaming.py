@@ -13,12 +13,17 @@ from app.modules.streaming.models import (
     ChannelStatus,
     LiveChannel,
     LiveEvent,
+    Manifest,
+    ManifestFormat,
+    ManifestStatus,
+    PlaybackSession,
     Recording,
     RecordingStatus,
     Stream,
     StreamKey,
     StreamProtocol,
     StreamStatus,
+    UserWatchHistory,
 )
 
 ModelT = TypeVar("ModelT")
@@ -78,11 +83,55 @@ class StreamingRepository:
     def channel(self, channel_id: UUID) -> LiveChannel | None:
         return self.db.get(LiveChannel, channel_id)
 
+    def public_channel_for_catalog_item(self, catalog_item_id: UUID) -> LiveChannel | None:
+        return self.db.execute(
+            select(LiveChannel).where(
+                LiveChannel.catalog_item_id == catalog_item_id,
+                LiveChannel.is_public.is_(True),
+            )
+        ).scalar_one_or_none()
+
     def live_event(self, event_id: UUID) -> LiveEvent | None:
         return self.db.get(LiveEvent, event_id)
 
     def recording(self, recording_id: UUID) -> Recording | None:
         return self.db.get(Recording, recording_id)
+
+    def ready_hls_manifest_for_channel(self, channel_id: UUID) -> Manifest | None:
+        return self.db.execute(
+            select(Manifest)
+            .join(Stream, Stream.id == Manifest.stream_id)
+            .where(
+                Stream.live_channel_id == channel_id,
+                Manifest.format == ManifestFormat.HLS,
+                Manifest.status == ManifestStatus.READY,
+            )
+            .order_by(Manifest.generation.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    def ready_hls_manifest_for_recording(self, recording_id: UUID) -> Manifest | None:
+        return self.db.execute(
+            select(Manifest)
+            .where(
+                Manifest.recording_id == recording_id,
+                Manifest.format == ManifestFormat.HLS,
+                Manifest.status == ManifestStatus.READY,
+            )
+            .order_by(Manifest.generation.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    def add_playback_session(self, session: PlaybackSession) -> PlaybackSession:
+        return self.add(session)
+
+    def get_playback_session(self, session_id: UUID) -> PlaybackSession | None:
+        return self.db.execute(
+            select(PlaybackSession).where(PlaybackSession.id == session_id)
+        ).scalar_one_or_none()
+
+    def add_watch_history(self, history: UserWatchHistory) -> UserWatchHistory:
+        return self.add(history)
 
     @staticmethod
     def _before_cursor(

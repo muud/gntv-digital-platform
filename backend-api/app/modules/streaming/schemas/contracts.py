@@ -242,6 +242,11 @@ class PlaybackResolveQuery(ContractModel):
     device_id: str = Field(min_length=1, max_length=160)
 
 
+class PlaybackMode(StrEnum):
+    LIVE = "live"
+    VOD = "vod"
+
+
 class PlaybackTokenRequest(ContractModel):
     live_channel_id: UUID | None = None
     recording_id: UUID | None = None
@@ -259,12 +264,13 @@ class PlaybackTokenRequest(ContractModel):
 
 class PlaybackAuthorizationResponse(ContractModel):
     playback_session_id: UUID
-    protocol: ManifestFormat
-    signed_url: str
+    playback_url: str
+    manifest_type: Literal["hls"] = "hls"
     expires_at: datetime
+    content_id: UUID
+    playback_mode: PlaybackMode
     heartbeat_interval_seconds: int = Field(gt=0)
     policy_version: int = Field(ge=1)
-    fallback_url: str | None = None
 
 
 class PlaybackTokenResponse(ContractModel):
@@ -275,6 +281,14 @@ class PlaybackTokenResponse(ContractModel):
     policy_version: int = Field(ge=1)
     heartbeat_interval_seconds: int = Field(gt=0)
     signed_url: str
+
+
+class PlaybackPathValidationResponse(ContractModel):
+    valid: Literal[True] = True
+    path: str
+    expires_at: datetime
+    playback_session_id: UUID
+    policy_version: int = Field(ge=1)
 
 
 class PlaybackSessionResponse(ContractModel):
@@ -291,6 +305,38 @@ class PlaybackSessionResponse(ContractModel):
     expires_at: datetime
     position_ms: int
     policy_version: int
+
+
+class PlaybackHeartbeatRequest(ContractModel):
+    position_ms: int = Field(default=0, ge=0)
+    state: PlaybackSessionStatus = PlaybackSessionStatus.PLAYING
+    bitrate_bps: int | None = Field(default=None, ge=0)
+
+
+class PlaybackHeartbeatResponse(ContractModel):
+    session_id: UUID
+    status: PlaybackSessionStatus
+    next_heartbeat_seconds: int = Field(gt=0)
+    position_ms: int = Field(ge=0)
+
+
+class PlaybackStopRequest(ContractModel):
+    position_ms: int = Field(default=0, ge=0)
+
+
+class PlaybackStopResponse(ContractModel):
+    session_id: UUID
+    status: Literal["ended"] = "ended"
+    final_position_ms: int = Field(ge=0)
+
+
+class PlaybackRevokeRequest(ContractModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class PlaybackRevokeResponse(ContractModel):
+    session_id: UUID
+    status: Literal["revoked"] = "revoked"
 
 
 class RecordingResponse(ContractModel):
