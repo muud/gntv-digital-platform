@@ -5,8 +5,12 @@ from app.modules.streaming.schemas.contracts import (
     ApsaraCallbackEvent,
     CallbackAcceptedResponse,
     CursorPageMeta,
+    DRMLicenseChallengeRequest,
+    DRMTokenRequest,
+    DRMTokenResponse,
     DVRSegmentIngestResponse,
     DVRSegmentResponse,
+    GeoCheckResponse,
     IngestPolicy,
     LiveChannelCreateRequest,
     LiveChannelPageResponse,
@@ -40,6 +44,7 @@ from app.modules.streaming.schemas.contracts import (
     StreamStopRequest,
     ThumbnailResponse,
     TranscodingJobResponse,
+    WatermarkTokenResponse,
 )
 
 __all__ = [
@@ -47,8 +52,12 @@ __all__ = [
     "ApsaraCallbackEvent",
     "CallbackAcceptedResponse",
     "CursorPageMeta",
+    "DRMLicenseChallengeRequest",
+    "DRMTokenRequest",
+    "DRMTokenResponse",
     "DVRSegmentIngestResponse",
     "DVRSegmentResponse",
+    "GeoCheckResponse",
     "IngestPolicy",
     "LiveChannelCreateRequest",
     "LiveChannelPageResponse",
@@ -82,4 +91,5 @@ __all__ = [
     "StreamStopRequest",
     "ThumbnailResponse",
     "TranscodingJobResponse",
+    "WatermarkTokenResponse",
 ]
