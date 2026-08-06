@@ -14,12 +14,15 @@ from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.modules.streaming.models import ChannelStatus, RecordingStatus, StreamProtocol, StreamStatus
 from app.modules.streaming.permissions import require_streaming_scope
-from app.modules.streaming.repositories import DVRRepository
+from app.modules.streaming.repositories import DRMRepository, DVRRepository, StreamingRepository
 from app.modules.streaming.schemas import (
     ApiErrorResponse,
     ApsaraCallbackEvent,
     CallbackAcceptedResponse,
+    DRMTokenRequest,
+    DRMTokenResponse,
     DVRSegmentIngestResponse,
+    GeoCheckResponse,
     LiveChannelCreateRequest,
     LiveChannelPageResponse,
     LiveChannelResponse,
@@ -45,9 +48,10 @@ from app.modules.streaming.schemas import (
     StreamStartRequest,
     StreamStopRequest,
 )
-from app.modules.streaming.repositories import StreamingRepository
 from app.modules.streaming.services import (
+    DRMService,
     DVRService,
+    GeoFencingService,
     HLS_MEDIA_TYPE,
     InMemoryDVRTimelineStore,
     PlaybackService,
@@ -88,6 +92,18 @@ def get_playback_service(db: Annotated[Session, Depends(get_db)]) -> PlaybackSer
 
 
 PlaybackServiceDependency = Annotated[PlaybackService, Depends(get_playback_service)]
+
+
+def get_geo_service() -> GeoFencingService:
+    return GeoFencingService()
+
+
+def get_drm_service(db: Annotated[Session, Depends(get_db)]) -> DRMService:
+    return DRMService(DRMRepository(db), GeoFencingService())
+
+
+GeoServiceDependency = Annotated[GeoFencingService, Depends(get_geo_service)]
+DRMServiceDependency = Annotated[DRMService, Depends(get_drm_service)]
 CreateUser = Annotated[User, Depends(require_streaming_scope("stream:create"))]
 ReadUser = Annotated[User, Depends(require_streaming_scope("stream:read"))]
 WriteUser = Annotated[User, Depends(require_streaming_scope("stream:write"))]
@@ -438,4 +454,81 @@ def list_recordings(
     )
 
 
-__all__ = ["get_playback_service", "get_streaming_service", "router"]
+@router.post(
+    "/playback/{target_id}/drm-token",
+    response_model=DRMTokenResponse,
+    status_code=status.HTTP_200_OK,
+    responses=ERROR_RESPONSES,
+)
+def issue_drm_token(
+    target_id: UUID,
+    payload: DRMTokenRequest,
+    drm_service: DRMServiceDependency,
+    user: AuthenticatedUser,
+) -> DRMTokenResponse:
+    token, license_url, expires_at = drm_service.issue_drm_token(
+        target_id=target_id,
+        user_id=user.id,
+        device_id=payload.device_id,
+        drm_system=payload.drm_system,
+        session_id=payload.session_id,
+    )
+    return DRMTokenResponse(
+        drm_token=token,
+        license_server_url=license_url,
+        expires_at=expires_at,
+    )
+
+
+@router.get("/drm/fairplay/cert", response_class=Response, responses=ERROR_RESPONSES)
+def get_fairplay_cert(drm_service: DRMServiceDependency) -> Response:
+    cert_bytes = drm_service.get_fairplay_cert()
+    return Response(content=cert_bytes, media_type="application/octet-stream")
+
+
+@router.post("/drm/{drm_system}/license", response_class=Response, responses=ERROR_RESPONSES)
+async def process_drm_license(
+    drm_system: str,
+    request: Request,
+    drm_service: DRMServiceDependency,
+    authorization: Annotated[str | None, Header()] = None,
+) -> Response:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "missing_drm_authorization_header"},
+        )
+    token = authorization.split("Bearer ", 1)[1]
+    token_payload = drm_service.validate_drm_token(token)
+
+    challenge_bytes = await request.body()
+    if not challenge_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "empty_license_challenge"},
+        )
+
+    license_bytes = drm_service.process_license_challenge(
+        drm_system=drm_system,
+        challenge_bytes=challenge_bytes,
+        token_payload=token_payload,
+    )
+    return Response(content=license_bytes, media_type="application/octet-stream")
+
+
+@router.get("/geo/check", response_model=GeoCheckResponse, responses=ERROR_RESPONSES)
+def check_geo_status(
+    request: Request,
+    geo_service: GeoServiceDependency,
+) -> GeoCheckResponse:
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    country, is_vpn, is_proxy = geo_service.resolve_ip_metadata(client_ip, dict(request.headers))
+    return GeoCheckResponse(
+        allowed=True,
+        country_code=country,
+        is_vpn=is_vpn,
+        is_proxy=is_proxy,
+    )
+
+
+__all__ = ["get_drm_service", "get_geo_service", "get_playback_service", "get_streaming_service", "router"]

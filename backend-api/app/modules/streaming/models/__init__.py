@@ -2,7 +2,10 @@
 
 from app.modules.streaming.models.domain import (
     ChannelStatus,
+    DRMKey,
+    DRMPolicy,
     DVRSegmentIndex,
+    GeoPolicy,
     LiveChannel,
     LiveEvent,
     LiveEventStatus,
@@ -31,7 +34,10 @@ from app.modules.streaming.models.domain import (
 
 __all__ = [
     "ChannelStatus",
+    "DRMKey",
+    "DRMPolicy",
     "DVRSegmentIndex",
+    "GeoPolicy",
     "LiveChannel",
     "LiveEvent",
     "LiveEventStatus",

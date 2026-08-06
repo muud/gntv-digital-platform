@@ -206,6 +206,8 @@ class LiveChannel(Base, TimestampVersionMixin):
     dvr_window_seconds: Mapped[int] = mapped_column(Integer, default=7200, nullable=False)
     catchup_retention_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
     dvr_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    drm_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("drm_policies.id", ondelete="SET NULL"))
+    geo_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("geo_policies.id", ondelete="SET NULL"))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     updated_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
@@ -352,6 +354,8 @@ class Recording(Base, TimestampVersionMixin):
     epg_event_id: Mapped[str | None] = mapped_column(String(160))
     failure_code: Mapped[str | None] = mapped_column(String(100))
     failure_detail: Mapped[str | None] = mapped_column(Text)
+    drm_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("drm_policies.id", ondelete="SET NULL"))
+    geo_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("geo_policies.id", ondelete="SET NULL"))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     updated_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
@@ -624,4 +628,51 @@ class UserWatchHistory(Base, TimestampVersionMixin):
         CheckConstraint("max_position_ms >= 0", name="ck_watch_history_position"),
         CheckConstraint("completion_ratio >= 0.0 AND completion_ratio <= 1.0", name="ck_watch_history_completion"),
         Index("idx_watch_history_user_time", "user_id", "created_at"),
+    )
+
+
+class DRMPolicy(Base, TimestampVersionMixin):
+    __tablename__ = "drm_policies"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    provider: Mapped[str] = mapped_column(String(50), default="alibaba_kms", nullable=False)
+    max_resolution: Mapped[str] = mapped_column(String(20), default="1080p", nullable=False)
+    hdcp_enforcement: Mapped[str] = mapped_column(String(20), default="hdcp_v2_2", nullable=False)
+    allow_persistent_license: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    license_duration_seconds: Mapped[int] = mapped_column(Integer, default=86400, nullable=False)
+    rental_duration_seconds: Mapped[int] = mapped_column(Integer, default=172800, nullable=False)
+
+
+class GeoPolicy(Base, TimestampVersionMixin):
+    __tablename__ = "geo_policies"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    country_allow_list: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    country_deny_list: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    block_vpn: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    block_proxy: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    fail_closed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class DRMKey(Base, TimestampVersionMixin):
+    __tablename__ = "drm_keys"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, unique=True, default=uuid4)
+    policy_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("drm_policies.id", ondelete="RESTRICT")
+    )
+    asset_id: Mapped[UUID | None] = mapped_column(Uuid)
+    live_channel_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="CASCADE")
+    )
+    encrypted_key_envelope: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(50), default="AES-128-CTR", nullable=False)
+    key_rotation_interval_seconds: Mapped[int | None] = mapped_column(Integer, default=86400)
+
+    __table_args__ = (
+        Index("idx_drm_keys_asset", "asset_id"),
+        Index("idx_drm_keys_channel", "live_channel_id"),
     )

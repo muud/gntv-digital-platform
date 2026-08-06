@@ -446,3 +446,36 @@ class DVRSegmentIngestResponse(ContractModel):
     idempotency_outcome: Literal["accepted", "duplicate"]
     correlation_id: str
     segment: DVRSegmentResponse
+
+
+class DRMTokenRequest(ContractModel):
+    target_id: UUID
+    device_id: str = Field(min_length=1, max_length=160)
+    drm_system: Literal["widevine", "fairplay", "playready"]
+    session_id: UUID | None = None
+
+
+class DRMTokenResponse(ContractModel):
+    drm_token: str
+    license_server_url: str
+    expires_at: datetime
+
+
+class DRMLicenseChallengeRequest(ContractModel):
+    challenge_b64: str = Field(min_length=1)
+
+
+class GeoCheckResponse(ContractModel):
+    allowed: bool
+    country_code: str
+    is_vpn: bool
+    is_proxy: bool
+    reason: str | None = None
+
+
+class WatermarkTokenResponse(ContractModel):
+    session_id: UUID
+    text: str
+    opacity: float
+    ab_sequence: str
+    interval_seconds: int

@@ -75,11 +75,25 @@ function mapPlaybackContract(payload) {
   return { ...contract, playback_url: playbackUrl.href };
 }
 
-function errorMessageForStatus(status) {
+function errorMessageForStatus(status, detailCode) {
+  if (detailCode === "country_denied" || detailCode === "country_not_allowed" || detailCode === "vpn_detected") {
+    return "CONTENT NOT AVAILABLE IN YOUR REGION (GEOGRAPHIC RESTRICTION).";
+  }
+  if (detailCode === "unsupported_drm_system" || detailCode === "drm_token_expired") {
+    return "DRM LICENSE ERROR: UNABLE TO DECRYPT PROTECTED STREAM.";
+  }
   if (status === 400) return "This channel cannot be played with the requested stream format.";
-  if (status === 403) return "Playback is not authorized or the stream link has expired.";
+  if (status === 403) return "Playback is not authorized, geo-restricted, or the stream link has expired.";
   if (status === 404) return "This channel does not currently have a playable stream.";
   return "The playback service is temporarily unavailable.";
+}
+
+export function VisibleWatermark(text = "GNTV • DIGITAL PROTECTED STREAM") {
+  return `
+    <div class="player-watermark-overlay" id="player-watermark-overlay" aria-hidden="true">
+      <span class="watermark-text" id="watermark-text-content">${text}</span>
+    </div>
+  `;
 }
 
 export function LiveBadge(label = "LIVE") {
@@ -172,6 +186,7 @@ export function initLivePlayer(container) {
           </div>
         </div>
         ${DVRControlsOverlay()}
+        ${VisibleWatermark()}
       </div>
 
       <div class="player-controls">
@@ -246,6 +261,20 @@ export function initLivePlayer(container) {
   let activeChannel = null;
   let activeTimeShift = 0;
   let dvrMode = "live";
+
+  // Sprint 6.4 Watermark Anti-Tampering Observer
+  const watermarkObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === "childList") {
+        const wm = screenWrapper.querySelector("#player-watermark-overlay");
+        if (!wm) {
+          video.pause();
+          console.warn("[DRM Security] Watermark element removal detected. Playback paused.");
+        }
+      }
+    }
+  });
+  watermarkObserver.observe(screenWrapper, { childList: true, subtree: true });
 
   const setLoading = (visible, message = "SECURING LIVE DOWNLINK…") => {
     loadingMessage.textContent = message;
@@ -646,6 +675,7 @@ export function initLivePlayer(container) {
     loadGeneration += 1;
     cancelPendingPlayback();
     clearInterval(heartbeatInterval);
+    watermarkObserver.disconnect();
     store.endVideoSession();
     unsubChannel();
     unsubCamera();
