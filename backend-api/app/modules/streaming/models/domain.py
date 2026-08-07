@@ -676,3 +676,76 @@ class DRMKey(Base, TimestampVersionMixin):
         Index("idx_drm_keys_asset", "asset_id"),
         Index("idx_drm_keys_channel", "live_channel_id"),
     )
+
+
+class QoEEventRaw(Base, TimestampVersionMixin):
+    __tablename__ = "qoe_events_raw"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    playback_session_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("playback_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    client_timestamp_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    server_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    position_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    bitrate_bps: Mapped[int | None] = mapped_column(Integer)
+    fps: Mapped[float | None] = mapped_column(Float)
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    __table_args__ = (
+        Index("idx_qoe_raw_session_time", "playback_session_id", "client_timestamp_ms"),
+    )
+
+
+class QoESessionMetric(Base, TimestampVersionMixin):
+    __tablename__ = "qoe_session_metrics"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    playback_session_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("playback_sessions.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    live_channel_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="SET NULL")
+    )
+    recording_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("recordings.id", ondelete="SET NULL")
+    )
+    startup_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    total_rebuffer_duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rebuffer_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rebuffer_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    average_bitrate_bps: Mapped[int | None] = mapped_column(Integer)
+    total_watch_duration_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    completion_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    device_category: Mapped[str] = mapped_column(String(50), default="web", nullable=False)
+    network_type: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    has_error: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (
+        Index("idx_qoe_session_target", "live_channel_id", "recording_id", "created_at"),
+    )
+
+
+class QoEAggregateHourly(Base, TimestampVersionMixin):
+    __tablename__ = "qoe_aggregates_hourly"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    device_category: Mapped[str] = mapped_column(String(50), default="all", nullable=False)
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    total_sessions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    p50_startup_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    p95_startup_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    avg_rebuffer_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    total_errors: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    avg_bitrate_bps: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("idx_qoe_agg_window_target", "window_start", "target_id", "device_category"),
+    )

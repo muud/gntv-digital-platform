@@ -17,6 +17,7 @@ from app.modules.streaming.services.playback import (
     validate_signed_playback_path,
 )
 from app.modules.streaming.services.redis_session_store import RedisSessionMeta, RedisSessionStore
+from app.modules.streaming.services.telemetry import QoEService
 from app.modules.streaming.services.watermark import WatermarkService
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "InMemoryDVRTimelineStore",
     "PlaybackPathError",
     "PlaybackService",
+    "QoEService",
     "RedisDVRTimelineStore",
     "RedisSessionMeta",
     "RedisSessionStore",
