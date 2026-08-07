@@ -1,5 +1,7 @@
 import { store } from "../../../shared/src/state.js";
 import { CHANNELS } from "../../../shared/src/utils/mockData.js";
+import { TelemetryCollector } from "../services/telemetry.js";
+
 
 const MAX_RETRIES = 3;
 const NON_RETRYABLE_STATUSES = new Set([400, 403, 404]);
@@ -670,12 +672,21 @@ export function initLivePlayer(container) {
   video.volume = initialVolume / 100;
   updateMuteControl();
 
+  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const telemetryCollector = new TelemetryCollector(apiBaseUrl, activeSessionId);
+  video.addEventListener("play", () => telemetryCollector.track("play", (video.currentTime || 0) * 1000));
+  video.addEventListener("pause", () => telemetryCollector.track("pause", (video.currentTime || 0) * 1000));
+  video.addEventListener("error", () =>
+    telemetryCollector.track("error", (video.currentTime || 0) * 1000, null, null, "media_element_error"),
+  );
+
   return () => {
     destroyed = true;
     loadGeneration += 1;
     cancelPendingPlayback();
     clearInterval(heartbeatInterval);
     watermarkObserver.disconnect();
+    telemetryCollector.destroy();
     store.endVideoSession();
     unsubChannel();
     unsubCamera();

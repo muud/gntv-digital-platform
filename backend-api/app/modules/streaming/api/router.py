@@ -14,7 +14,7 @@ from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.modules.streaming.models import ChannelStatus, RecordingStatus, StreamProtocol, StreamStatus
 from app.modules.streaming.permissions import require_streaming_scope
-from app.modules.streaming.repositories import DRMRepository, DVRRepository, StreamingRepository
+from app.modules.streaming.repositories import DRMRepository, DVRRepository, QoERepository, StreamingRepository
 from app.modules.streaming.schemas import (
     ApiErrorResponse,
     ApsaraCallbackEvent,
@@ -37,6 +37,7 @@ from app.modules.streaming.schemas import (
     PlaybackStopResponse,
     PlaybackTokenRequest,
     PlaybackTokenResponse,
+    QoEAggregateQueryResponse,
     RecordingPageResponse,
     StopMode,
     StreamAcceptedResponse,
@@ -47,6 +48,8 @@ from app.modules.streaming.schemas import (
     StreamPageResponse,
     StreamStartRequest,
     StreamStopRequest,
+    TelemetryBatchRequest,
+    TelemetryBatchResponse,
 )
 from app.modules.streaming.services import (
     DRMService,
@@ -55,6 +58,7 @@ from app.modules.streaming.services import (
     HLS_MEDIA_TYPE,
     InMemoryDVRTimelineStore,
     PlaybackService,
+    QoEService,
     RedisDVRTimelineStore,
     StreamingServiceInterface,
 )
@@ -104,6 +108,14 @@ def get_drm_service(db: Annotated[Session, Depends(get_db)]) -> DRMService:
 
 GeoServiceDependency = Annotated[GeoFencingService, Depends(get_geo_service)]
 DRMServiceDependency = Annotated[DRMService, Depends(get_drm_service)]
+
+
+def get_qoe_service(db: Annotated[Session, Depends(get_db)]) -> QoEService:
+    return QoEService(QoERepository(db))
+
+
+QoEServiceDependency = Annotated[QoEService, Depends(get_qoe_service)]
+
 CreateUser = Annotated[User, Depends(require_streaming_scope("stream:create"))]
 ReadUser = Annotated[User, Depends(require_streaming_scope("stream:read"))]
 WriteUser = Annotated[User, Depends(require_streaming_scope("stream:write"))]
@@ -531,4 +543,44 @@ def check_geo_status(
     )
 
 
-__all__ = ["get_drm_service", "get_geo_service", "get_playback_service", "get_streaming_service", "router"]
+@router.post("/telemetry/batch", response_model=TelemetryBatchResponse, responses=ERROR_RESPONSES)
+def ingest_telemetry_batch(
+    request: Request,
+    payload: TelemetryBatchRequest,
+    qoe_service: QoEServiceDependency,
+) -> TelemetryBatchResponse:
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    user_agent = request.headers.get("user-agent")
+    return qoe_service.ingest_batch(
+        request=payload,
+        client_ip=client_ip,
+        user_agent=user_agent,
+    )
+
+
+@router.get("/telemetry/metrics/summary", response_model=QoEAggregateQueryResponse, responses=ERROR_RESPONSES)
+def get_qoe_metrics_summary(
+    target_id: UUID,
+    qoe_service: QoEServiceDependency,
+    _: ReadUser,
+) -> QoEAggregateQueryResponse:
+    res = qoe_service.get_metrics_summary(target_id)
+    return QoEAggregateQueryResponse(
+        target_id=UUID(res["target_id"]),
+        total_sessions=res["total_sessions"],
+        p50_startup_latency_ms=res["p50_startup_latency_ms"],
+        p95_startup_latency_ms=res["p95_startup_latency_ms"],
+        avg_rebuffer_ratio=res["avg_rebuffer_ratio"],
+        total_errors=res["total_errors"],
+        status=res["status"],
+    )
+
+
+__all__ = [
+    "get_drm_service",
+    "get_geo_service",
+    "get_playback_service",
+    "get_qoe_service",
+    "get_streaming_service",
+    "router",
+]

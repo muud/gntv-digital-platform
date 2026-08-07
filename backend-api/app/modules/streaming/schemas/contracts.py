@@ -479,3 +479,48 @@ class WatermarkTokenResponse(ContractModel):
     opacity: float
     ab_sequence: str
     interval_seconds: int
+
+
+class TelemetryEventItem(ContractModel):
+    event_type: str = Field(pattern=r"^(play|pause|seek|resume|stop|startup|buffer_start|buffer_end|bitrate_change|error|fps_drop)$")
+    timestamp_ms: int = Field(ge=0)
+    position_ms: int = Field(default=0, ge=0)
+    bitrate_bps: int | None = Field(default=None, ge=0)
+    fps: float | None = Field(default=None, ge=0.0)
+    error_code: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TelemetryBatchRequest(ContractModel):
+    session_id: UUID
+    sequence_number: int = Field(ge=0)
+    client_timestamp_ms: int = Field(ge=0)
+    events: list[TelemetryEventItem] = Field(min_length=1, max_length=100)
+
+
+class TelemetryBatchResponse(ContractModel):
+    accepted_count: int
+    dropped_count: int
+    next_flush_interval_ms: int = 10000
+
+
+class QoESessionSummaryResponse(ContractModel):
+    session_id: UUID
+    startup_latency_ms: int | None = None
+    total_rebuffer_duration_ms: int = 0
+    rebuffer_count: int = 0
+    rebuffer_ratio: float = 0.0
+    average_bitrate_bps: int | None = None
+    total_watch_duration_ms: int = 0
+    completion_ratio: float = 0.0
+    has_error: bool = False
+
+
+class QoEAggregateQueryResponse(ContractModel):
+    target_id: UUID
+    total_sessions: int
+    p50_startup_latency_ms: int
+    p95_startup_latency_ms: int
+    avg_rebuffer_ratio: float
+    total_errors: int
+    status: str
