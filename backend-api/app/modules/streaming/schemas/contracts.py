@@ -524,3 +524,20 @@ class QoEAggregateQueryResponse(ContractModel):
     avg_rebuffer_ratio: float
     total_errors: int
     status: str
+
+
+class PlaybackPreferencesRequest(ContractModel):
+    preferred_subtitle_lang: str = Field("none", min_length=2, max_length=10)
+    preferred_audio_lang: str = Field("default", min_length=2, max_length=10)
+    caption_font_size: str = Field("medium", max_length=20)
+    caption_bg_opacity: float = Field(0.75, ge=0.0, le=1.0)
+    tv_mode_enabled: bool = False
+
+
+class PlaybackPreferencesResponse(ContractModel):
+    preferred_subtitle_lang: str
+    preferred_audio_lang: str
+    caption_font_size: str
+    caption_bg_opacity: float
+    tv_mode_enabled: bool
+    status: str = "ok"

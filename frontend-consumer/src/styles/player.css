@@ -353,3 +353,50 @@
   75% { transform: translate(180px, 20px); }
   100% { transform: translate(10px, 120px); }
 }
+
+/* Sprint 6.6 Smart TV 10-Foot UI, Mobile & WCAG 2.2 AA Accessibility */
+.player-screen-wrapper {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.tv-focusable:focus-visible {
+  outline: 3px solid #ffcc00 !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 12px rgba(255, 204, 0, 0.8) !important;
+  transform: scale(1.05);
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tracks-modal {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(18, 22, 32, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 24px;
+  z-index: 10;
+  color: #fff;
+  min-width: 320px;
+  backdrop-filter: blur(12px);
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

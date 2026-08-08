@@ -1,6 +1,10 @@
 import { store } from "../../../shared/src/state.js";
 import { CHANNELS } from "../../../shared/src/utils/mockData.js";
 import { TelemetryCollector } from "../services/telemetry.js";
+import { SpatialNavigationManager } from "../utils/spatialNavigation.js";
+import { MobileGestureController } from "../utils/mobileGestures.js";
+import { AccessibilityAnnouncer } from "../utils/accessibilityAnnouncer.js";
+
 
 
 const MAX_RETRIES = 3;
@@ -680,6 +684,12 @@ export function initLivePlayer(container) {
     telemetryCollector.track("error", (video.currentTime || 0) * 1000, null, null, "media_element_error"),
   );
 
+  const announcer = new AccessibilityAnnouncer();
+  announcer.announce("GNTV Live Player Ready");
+
+  const spatialNav = new SpatialNavigationManager(container);
+  const mobileGestures = new MobileGestureController(video);
+
   return () => {
     destroyed = true;
     loadGeneration += 1;
@@ -687,6 +697,9 @@ export function initLivePlayer(container) {
     clearInterval(heartbeatInterval);
     watermarkObserver.disconnect();
     telemetryCollector.destroy();
+    spatialNav.destroy();
+    mobileGestures.destroy();
+    announcer.destroy();
     store.endVideoSession();
     unsubChannel();
     unsubCamera();
