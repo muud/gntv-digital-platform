@@ -12,7 +12,13 @@ from app.core.database import get_db
 from app.core.redis import redis_manager
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.modules.streaming.models import ChannelStatus, RecordingStatus, StreamProtocol, StreamStatus
+from app.modules.streaming.models import (
+    ChannelStatus,
+    RecordingStatus,
+    StreamProtocol,
+    StreamStatus,
+    UserPlaybackPreference,
+)
 from app.modules.streaming.permissions import require_streaming_scope
 from app.modules.streaming.repositories import DRMRepository, DVRRepository, QoERepository, StreamingRepository
 from app.modules.streaming.schemas import (
@@ -30,6 +36,8 @@ from app.modules.streaming.schemas import (
     PlaybackHeartbeatRequest,
     PlaybackHeartbeatResponse,
     PlaybackPathValidationResponse,
+    PlaybackPreferencesRequest,
+    PlaybackPreferencesResponse,
     PlaybackResolveQuery,
     PlaybackRevokeRequest,
     PlaybackRevokeResponse,
@@ -574,6 +582,66 @@ def get_qoe_metrics_summary(
         total_errors=res["total_errors"],
         status=res["status"],
     )
+
+
+@router.get("/preferences", response_model=PlaybackPreferencesResponse, responses=ERROR_RESPONSES)
+def get_user_playback_preferences(
+    user: ReadUser,
+    db: Session = Depends(get_db),
+) -> PlaybackPreferencesResponse:
+    pref = db.query(UserPlaybackPreference).filter(UserPlaybackPreference.user_id == user.id).first()
+    if not pref:
+        return PlaybackPreferencesResponse(
+            preferred_subtitle_lang="none",
+            preferred_audio_lang="default",
+            caption_font_size="medium",
+            caption_bg_opacity=0.75,
+            tv_mode_enabled=False,
+        )
+    return PlaybackPreferencesResponse(
+        preferred_subtitle_lang=pref.preferred_subtitle_lang,
+        preferred_audio_lang=pref.preferred_audio_lang,
+        caption_font_size=pref.caption_font_size,
+        caption_bg_opacity=pref.caption_bg_opacity,
+        tv_mode_enabled=pref.tv_mode_enabled,
+    )
+
+
+@router.put("/preferences", response_model=PlaybackPreferencesResponse, responses=ERROR_RESPONSES)
+def update_user_playback_preferences(
+    payload: PlaybackPreferencesRequest,
+    user: ReadUser,
+    db: Session = Depends(get_db),
+) -> PlaybackPreferencesResponse:
+    pref = db.query(UserPlaybackPreference).filter(UserPlaybackPreference.user_id == user.id).first()
+    if not pref:
+        pref = UserPlaybackPreference(
+            user_id=user.id,
+            preferred_subtitle_lang=payload.preferred_subtitle_lang,
+            preferred_audio_lang=payload.preferred_audio_lang,
+            caption_font_size=payload.caption_font_size,
+            caption_bg_opacity=payload.caption_bg_opacity,
+            tv_mode_enabled=payload.tv_mode_enabled,
+        )
+        db.add(pref)
+    else:
+        pref.preferred_subtitle_lang = payload.preferred_subtitle_lang
+        pref.preferred_audio_lang = payload.preferred_audio_lang
+        pref.caption_font_size = payload.caption_font_size
+        pref.caption_bg_opacity = payload.caption_bg_opacity
+        pref.tv_mode_enabled = payload.tv_mode_enabled
+
+    db.commit()
+    db.refresh(pref)
+
+    return PlaybackPreferencesResponse(
+        preferred_subtitle_lang=pref.preferred_subtitle_lang,
+        preferred_audio_lang=pref.preferred_audio_lang,
+        caption_font_size=pref.caption_font_size,
+        caption_bg_opacity=pref.caption_bg_opacity,
+        tv_mode_enabled=pref.tv_mode_enabled,
+    )
+
 
 
 __all__ = [

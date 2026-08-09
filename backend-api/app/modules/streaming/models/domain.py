@@ -749,3 +749,24 @@ class QoEAggregateHourly(Base, TimestampVersionMixin):
     __table_args__ = (
         Index("idx_qoe_agg_window_target", "window_start", "target_id", "device_category"),
     )
+
+
+class UserPlaybackPreference(Base, TimestampVersionMixin):
+    __tablename__ = "user_playback_preferences"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=True,
+    )
+    preferred_subtitle_lang: Mapped[str] = mapped_column(String(10), default="none", nullable=False)
+    preferred_audio_lang: Mapped[str] = mapped_column(String(10), default="default", nullable=False)
+    caption_font_size: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    caption_bg_opacity: Mapped[float] = mapped_column(Float, default=0.75, nullable=False)
+    tv_mode_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (
+        Index("idx_user_pref_user", "user_id"),
+    )
