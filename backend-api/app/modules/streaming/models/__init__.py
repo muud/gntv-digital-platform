@@ -2,6 +2,10 @@
 
 from app.modules.streaming.models.domain import (
     ChannelStatus,
+    DRMKey,
+    DRMPolicy,
+    DVRSegmentIndex,
+    GeoPolicy,
     LiveChannel,
     LiveEvent,
     LiveEventStatus,
@@ -22,13 +26,22 @@ from app.modules.streaming.models.domain import (
     Thumbnail,
     ThumbnailKind,
     ThumbnailStatus,
+    QoEAggregateHourly,
+    QoEEventRaw,
+    QoESessionMetric,
     TranscodingJob,
     TranscodingJobStatus,
     TranscodingJobType,
+    UserPlaybackPreference,
+    UserWatchHistory,
 )
 
 __all__ = [
     "ChannelStatus",
+    "DRMKey",
+    "DRMPolicy",
+    "DVRSegmentIndex",
+    "GeoPolicy",
     "LiveChannel",
     "LiveEvent",
     "LiveEventStatus",
@@ -38,6 +51,9 @@ __all__ = [
     "ManifestStatus",
     "PlaybackSession",
     "PlaybackSessionStatus",
+    "QoEAggregateHourly",
+    "QoEEventRaw",
+    "QoESessionMetric",
     "Recording",
     "RecordingPolicy",
     "RecordingStatus",
@@ -52,4 +68,6 @@ __all__ = [
     "TranscodingJob",
     "TranscodingJobStatus",
     "TranscodingJobType",
+    "UserPlaybackPreference",
+    "UserWatchHistory",
 ]

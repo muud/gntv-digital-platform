@@ -62,6 +62,9 @@ class LiveChannelCreateRequest(ContractModel):
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
     primary_ingest_host: str | None = Field(default=None, max_length=500)
     backup_ingest_host: str | None = Field(default=None, max_length=500)
+    dvr_window_seconds: int = Field(default=7200, ge=0, le=604800)
+    catchup_retention_days: int = Field(default=7, ge=0, le=365)
+    dvr_enabled: bool = False
 
     @field_validator("timezone")
     @classmethod
@@ -95,6 +98,9 @@ class LiveChannelResponse(ContractModel):
     current_event_id: UUID | None
     primary_ingest_host: str | None
     backup_ingest_host: str | None
+    dvr_window_seconds: int = 7200
+    catchup_retention_days: int = 7
+    dvr_enabled: bool = False
     created_at: datetime
     updated_at: datetime
     lock_version: int
@@ -228,6 +234,16 @@ class ApsaraCallbackEvent(ContractModel):
     stream_identifier: str = Field(min_length=1, max_length=255)
     payload_version: str = Field(min_length=1, max_length=20)
     recording_object_key: str | None = Field(default=None, max_length=1024)
+    live_channel_id: UUID | None = None
+    live_event_id: UUID | None = None
+    stream_id: UUID | None = None
+    recording_id: UUID | None = None
+    segment_uri: str | None = Field(default=None, max_length=2048)
+    sequence_number: int | None = Field(default=None, ge=0)
+    segment_start_at: datetime | None = None
+    segment_end_at: datetime | None = None
+    duration_seconds: float | None = Field(default=None, gt=0)
+    rendition: str = Field(default="source", min_length=1, max_length=80)
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -240,6 +256,11 @@ class CallbackAcceptedResponse(ContractModel):
 class PlaybackResolveQuery(ContractModel):
     protocol: ManifestFormat | None = None
     device_id: str = Field(min_length=1, max_length=160)
+
+
+class PlaybackMode(StrEnum):
+    LIVE = "live"
+    VOD = "vod"
 
 
 class PlaybackTokenRequest(ContractModel):
@@ -259,12 +280,13 @@ class PlaybackTokenRequest(ContractModel):
 
 class PlaybackAuthorizationResponse(ContractModel):
     playback_session_id: UUID
-    protocol: ManifestFormat
-    signed_url: str
+    playback_url: str
+    manifest_type: Literal["hls"] = "hls"
     expires_at: datetime
+    content_id: UUID
+    playback_mode: PlaybackMode
     heartbeat_interval_seconds: int = Field(gt=0)
     policy_version: int = Field(ge=1)
-    fallback_url: str | None = None
 
 
 class PlaybackTokenResponse(ContractModel):
@@ -275,6 +297,14 @@ class PlaybackTokenResponse(ContractModel):
     policy_version: int = Field(ge=1)
     heartbeat_interval_seconds: int = Field(gt=0)
     signed_url: str
+
+
+class PlaybackPathValidationResponse(ContractModel):
+    valid: Literal[True] = True
+    path: str
+    expires_at: datetime
+    playback_session_id: UUID
+    policy_version: int = Field(ge=1)
 
 
 class PlaybackSessionResponse(ContractModel):
@@ -293,6 +323,38 @@ class PlaybackSessionResponse(ContractModel):
     policy_version: int
 
 
+class PlaybackHeartbeatRequest(ContractModel):
+    position_ms: int = Field(default=0, ge=0)
+    state: PlaybackSessionStatus = PlaybackSessionStatus.PLAYING
+    bitrate_bps: int | None = Field(default=None, ge=0)
+
+
+class PlaybackHeartbeatResponse(ContractModel):
+    session_id: UUID
+    status: PlaybackSessionStatus
+    next_heartbeat_seconds: int = Field(gt=0)
+    position_ms: int = Field(ge=0)
+
+
+class PlaybackStopRequest(ContractModel):
+    position_ms: int = Field(default=0, ge=0)
+
+
+class PlaybackStopResponse(ContractModel):
+    session_id: UUID
+    status: Literal["ended"] = "ended"
+    final_position_ms: int = Field(ge=0)
+
+
+class PlaybackRevokeRequest(ContractModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class PlaybackRevokeResponse(ContractModel):
+    session_id: UUID
+    status: Literal["revoked"] = "revoked"
+
+
 class RecordingResponse(ContractModel):
     id: UUID
     stream_id: UUID
@@ -304,6 +366,9 @@ class RecordingResponse(ContractModel):
     started_at: datetime
     ended_at: datetime | None
     retention_until: datetime | None
+    start_sequence_number: int | None = None
+    end_sequence_number: int | None = None
+    epg_event_id: str | None = None
     created_at: datetime
     updated_at: datetime
     lock_version: int
@@ -356,3 +421,123 @@ class ThumbnailResponse(ContractModel):
     width: int
     height: int
     status: ThumbnailStatus
+
+
+class DVRSegmentResponse(ContractModel):
+    id: UUID
+    live_channel_id: UUID
+    stream_id: UUID | None
+    live_event_id: UUID | None
+    recording_id: UUID | None
+    rendition: str
+    sequence_number: int
+    segment_uri: str
+    segment_start_at: datetime
+    segment_end_at: datetime
+    duration_seconds: float
+    provider_event_id: str | None
+    apsara_object_key: str | None
+    is_pruned: bool
+    metadata_json: dict[str, Any]
+
+
+class DVRSegmentIngestResponse(ContractModel):
+    provider_event_id: str
+    idempotency_outcome: Literal["accepted", "duplicate"]
+    correlation_id: str
+    segment: DVRSegmentResponse
+
+
+class DRMTokenRequest(ContractModel):
+    target_id: UUID
+    device_id: str = Field(min_length=1, max_length=160)
+    drm_system: Literal["widevine", "fairplay", "playready"]
+    session_id: UUID | None = None
+
+
+class DRMTokenResponse(ContractModel):
+    drm_token: str
+    license_server_url: str
+    expires_at: datetime
+
+
+class DRMLicenseChallengeRequest(ContractModel):
+    challenge_b64: str = Field(min_length=1)
+
+
+class GeoCheckResponse(ContractModel):
+    allowed: bool
+    country_code: str
+    is_vpn: bool
+    is_proxy: bool
+    reason: str | None = None
+
+
+class WatermarkTokenResponse(ContractModel):
+    session_id: UUID
+    text: str
+    opacity: float
+    ab_sequence: str
+    interval_seconds: int
+
+
+class TelemetryEventItem(ContractModel):
+    event_type: str = Field(pattern=r"^(play|pause|seek|resume|stop|startup|buffer_start|buffer_end|bitrate_change|error|fps_drop)$")
+    timestamp_ms: int = Field(ge=0)
+    position_ms: int = Field(default=0, ge=0)
+    bitrate_bps: int | None = Field(default=None, ge=0)
+    fps: float | None = Field(default=None, ge=0.0)
+    error_code: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TelemetryBatchRequest(ContractModel):
+    session_id: UUID
+    sequence_number: int = Field(ge=0)
+    client_timestamp_ms: int = Field(ge=0)
+    events: list[TelemetryEventItem] = Field(min_length=1, max_length=100)
+
+
+class TelemetryBatchResponse(ContractModel):
+    accepted_count: int
+    dropped_count: int
+    next_flush_interval_ms: int = 10000
+
+
+class QoESessionSummaryResponse(ContractModel):
+    session_id: UUID
+    startup_latency_ms: int | None = None
+    total_rebuffer_duration_ms: int = 0
+    rebuffer_count: int = 0
+    rebuffer_ratio: float = 0.0
+    average_bitrate_bps: int | None = None
+    total_watch_duration_ms: int = 0
+    completion_ratio: float = 0.0
+    has_error: bool = False
+
+
+class QoEAggregateQueryResponse(ContractModel):
+    target_id: UUID
+    total_sessions: int
+    p50_startup_latency_ms: int
+    p95_startup_latency_ms: int
+    avg_rebuffer_ratio: float
+    total_errors: int
+    status: str
+
+
+class PlaybackPreferencesRequest(ContractModel):
+    preferred_subtitle_lang: str = Field("none", min_length=2, max_length=10)
+    preferred_audio_lang: str = Field("default", min_length=2, max_length=10)
+    caption_font_size: str = Field("medium", max_length=20)
+    caption_bg_opacity: float = Field(0.75, ge=0.0, le=1.0)
+    tv_mode_enabled: bool = False
+
+
+class PlaybackPreferencesResponse(ContractModel):
+    preferred_subtitle_lang: str
+    preferred_audio_lang: str
+    caption_font_size: str
+    caption_bg_opacity: float
+    tv_mode_enabled: bool
+    status: str = "ok"

@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -202,10 +203,20 @@ class LiveChannel(Base, TimestampVersionMixin):
     )
     primary_ingest_host: Mapped[str | None] = mapped_column(String(500))
     backup_ingest_host: Mapped[str | None] = mapped_column(String(500))
+    dvr_window_seconds: Mapped[int] = mapped_column(Integer, default=7200, nullable=False)
+    catchup_retention_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    dvr_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    drm_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("drm_policies.id", ondelete="SET NULL"))
+    geo_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("geo_policies.id", ondelete="SET NULL"))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     updated_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
     __table_args__ = (
+        CheckConstraint("dvr_window_seconds >= 0", name="ck_live_channels_dvr_window"),
+        CheckConstraint(
+            "catchup_retention_days >= 0",
+            name="ck_live_channels_catchup_retention",
+        ),
         Index("idx_live_channels_status", "status"),
         Index("idx_live_channels_catalog", "catalog_item_id"),
     )
@@ -338,8 +349,13 @@ class Recording(Base, TimestampVersionMixin):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    start_sequence_number: Mapped[int | None] = mapped_column(BigInteger)
+    end_sequence_number: Mapped[int | None] = mapped_column(BigInteger)
+    epg_event_id: Mapped[str | None] = mapped_column(String(160))
     failure_code: Mapped[str | None] = mapped_column(String(100))
     failure_detail: Mapped[str | None] = mapped_column(Text)
+    drm_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("drm_policies.id", ondelete="SET NULL"))
+    geo_policy_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("geo_policies.id", ondelete="SET NULL"))
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     updated_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
@@ -347,9 +363,66 @@ class Recording(Base, TimestampVersionMixin):
         CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="ck_recording_duration"),
         CheckConstraint("size_bytes IS NULL OR size_bytes >= 0", name="ck_recording_size"),
         CheckConstraint("ended_at IS NULL OR ended_at >= started_at", name="ck_recording_time_order"),
+        CheckConstraint(
+            "start_sequence_number IS NULL OR start_sequence_number >= 0",
+            name="ck_recording_start_sequence",
+        ),
+        CheckConstraint(
+            "end_sequence_number IS NULL OR end_sequence_number >= 0",
+            name="ck_recording_end_sequence",
+        ),
+        CheckConstraint(
+            "end_sequence_number IS NULL OR start_sequence_number IS NULL "
+            "OR end_sequence_number >= start_sequence_number",
+            name="ck_recording_sequence_order",
+        ),
         Index("idx_recordings_stream", "stream_id"),
         Index("idx_recordings_event", "live_event_id"),
+        Index("idx_recordings_epg_event", "epg_event_id"),
         Index("idx_recordings_status_ended", "status", "ended_at"),
+    )
+
+
+class DVRSegmentIndex(Base, TimestampVersionMixin):
+    __tablename__ = "dvr_segment_index"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    live_channel_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="CASCADE"), nullable=False
+    )
+    stream_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("streams.id", ondelete="SET NULL"))
+    live_event_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_events.id", ondelete="SET NULL")
+    )
+    recording_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("recordings.id", ondelete="SET NULL")
+    )
+    rendition: Mapped[str] = mapped_column(String(80), default="source", nullable=False)
+    sequence_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    segment_uri: Mapped[str] = mapped_column(String(2048), nullable=False)
+    segment_start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    segment_end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    provider_event_id: Mapped[str | None] = mapped_column(String(200))
+    apsara_object_key: Mapped[str | None] = mapped_column(String(1024))
+    is_pruned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("sequence_number >= 0", name="ck_dvr_segment_sequence"),
+        CheckConstraint("duration_seconds > 0", name="ck_dvr_segment_duration"),
+        CheckConstraint("segment_end_at > segment_start_at", name="ck_dvr_segment_time_order"),
+        UniqueConstraint(
+            "live_channel_id",
+            "rendition",
+            "sequence_number",
+            name="uq_dvr_segment_channel_rendition_sequence",
+        ),
+        Index("idx_dvr_segment_channel_time", "live_channel_id", "segment_start_at"),
+        Index("idx_dvr_segment_channel_live_event", "live_channel_id", "live_event_id"),
+        Index("idx_dvr_segment_recording_sequence", "recording_id", "sequence_number"),
+        Index("idx_dvr_segment_provider_event", "provider_event_id"),
+        Index("idx_dvr_segment_prune", "live_channel_id", "segment_end_at", "is_pruned"),
     )
 
 
@@ -525,4 +598,175 @@ class Thumbnail(Base, TimestampVersionMixin):
         CheckConstraint("width > 0 AND height > 0", name="ck_thumbnail_dimensions"),
         Index("idx_thumbnail_recording_kind_time", "recording_id", "kind", "timestamp_ms"),
         Index("idx_thumbnail_stream", "stream_id"),
+    )
+
+
+class UserWatchHistory(Base, TimestampVersionMixin):
+    __tablename__ = "user_watch_history"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    playback_session_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("playback_sessions.id", ondelete="SET NULL")
+    )
+    live_channel_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="SET NULL")
+    )
+    recording_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("recordings.id", ondelete="SET NULL")
+    )
+    catalog_item_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("catalog_items.id", ondelete="SET NULL")
+    )
+    device_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    watch_duration_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    max_position_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    completion_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("watch_duration_ms >= 0", name="ck_watch_history_duration"),
+        CheckConstraint("max_position_ms >= 0", name="ck_watch_history_position"),
+        CheckConstraint("completion_ratio >= 0.0 AND completion_ratio <= 1.0", name="ck_watch_history_completion"),
+        Index("idx_watch_history_user_time", "user_id", "created_at"),
+    )
+
+
+class DRMPolicy(Base, TimestampVersionMixin):
+    __tablename__ = "drm_policies"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    provider: Mapped[str] = mapped_column(String(50), default="alibaba_kms", nullable=False)
+    max_resolution: Mapped[str] = mapped_column(String(20), default="1080p", nullable=False)
+    hdcp_enforcement: Mapped[str] = mapped_column(String(20), default="hdcp_v2_2", nullable=False)
+    allow_persistent_license: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    license_duration_seconds: Mapped[int] = mapped_column(Integer, default=86400, nullable=False)
+    rental_duration_seconds: Mapped[int] = mapped_column(Integer, default=172800, nullable=False)
+
+
+class GeoPolicy(Base, TimestampVersionMixin):
+    __tablename__ = "geo_policies"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    country_allow_list: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    country_deny_list: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    block_vpn: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    block_proxy: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    fail_closed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class DRMKey(Base, TimestampVersionMixin):
+    __tablename__ = "drm_keys"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    key_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, unique=True, default=uuid4)
+    policy_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("drm_policies.id", ondelete="RESTRICT")
+    )
+    asset_id: Mapped[UUID | None] = mapped_column(Uuid)
+    live_channel_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="CASCADE")
+    )
+    encrypted_key_envelope: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(50), default="AES-128-CTR", nullable=False)
+    key_rotation_interval_seconds: Mapped[int | None] = mapped_column(Integer, default=86400)
+
+    __table_args__ = (
+        Index("idx_drm_keys_asset", "asset_id"),
+        Index("idx_drm_keys_channel", "live_channel_id"),
+    )
+
+
+class QoEEventRaw(Base, TimestampVersionMixin):
+    __tablename__ = "qoe_events_raw"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    playback_session_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("playback_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    client_timestamp_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    server_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    position_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    bitrate_bps: Mapped[int | None] = mapped_column(Integer)
+    fps: Mapped[float | None] = mapped_column(Float)
+    error_code: Mapped[str | None] = mapped_column(String(100))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    __table_args__ = (
+        Index("idx_qoe_raw_session_time", "playback_session_id", "client_timestamp_ms"),
+    )
+
+
+class QoESessionMetric(Base, TimestampVersionMixin):
+    __tablename__ = "qoe_session_metrics"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    playback_session_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("playback_sessions.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    live_channel_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("live_channels.id", ondelete="SET NULL")
+    )
+    recording_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("recordings.id", ondelete="SET NULL")
+    )
+    startup_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    total_rebuffer_duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rebuffer_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rebuffer_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    average_bitrate_bps: Mapped[int | None] = mapped_column(Integer)
+    total_watch_duration_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    completion_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    device_category: Mapped[str] = mapped_column(String(50), default="web", nullable=False)
+    network_type: Mapped[str] = mapped_column(String(50), default="unknown", nullable=False)
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    has_error: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (
+        Index("idx_qoe_session_target", "live_channel_id", "recording_id", "created_at"),
+    )
+
+
+class QoEAggregateHourly(Base, TimestampVersionMixin):
+    __tablename__ = "qoe_aggregates_hourly"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    device_category: Mapped[str] = mapped_column(String(50), default="all", nullable=False)
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    total_sessions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    p50_startup_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    p95_startup_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    avg_rebuffer_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    total_errors: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    avg_bitrate_bps: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (
+        Index("idx_qoe_agg_window_target", "window_start", "target_id", "device_category"),
+    )
+
+
+class UserPlaybackPreference(Base, TimestampVersionMixin):
+    __tablename__ = "user_playback_preferences"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=True,
+    )
+    preferred_subtitle_lang: Mapped[str] = mapped_column(String(10), default="none", nullable=False)
+    preferred_audio_lang: Mapped[str] = mapped_column(String(10), default="default", nullable=False)
+    caption_font_size: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
+    caption_bg_opacity: Mapped[float] = mapped_column(Float, default=0.75, nullable=False)
+    tv_mode_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (
+        Index("idx_user_pref_user", "user_id"),
     )

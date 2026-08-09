@@ -74,6 +74,22 @@ class Settings(BaseSettings):
     MEDIA_MAX_FILE_SIZE: int = Field(default=5_368_709_120, validation_alias="MEDIA_MAX_FILE_SIZE")
     MEDIA_URL_TTL_SECONDS: int = Field(default=900, validation_alias="MEDIA_URL_TTL_SECONDS")
 
+    PLAYBACK_SIGNING_SECRET: SecretStr = Field(
+        default=SecretStr("development-playback-signing-secret"),
+        min_length=32,
+        validation_alias="PLAYBACK_SIGNING_SECRET",
+    )
+    PLAYBACK_TOKEN_TTL_SECONDS: int = Field(
+        default=600,
+        ge=30,
+        le=3600,
+        validation_alias="PLAYBACK_TOKEN_TTL_SECONDS",
+    )
+    PLAYBACK_PUBLIC_BASE_URL: str = Field(
+        default="https://stream.gntv.com",
+        validation_alias=AliasChoices("PLAYBACK_PUBLIC_BASE_URL", "ALIBABA_CDN_PLAY_DOMAIN"),
+    )
+
     model_config = SettingsConfigDict(
         case_sensitive=False,
         env_file=(".env", "../.env"),
@@ -107,6 +123,16 @@ class Settings(BaseSettings):
             and self.INGEST_GATEWAY_TOKEN == "development-ingest-gateway-token"
         ):
             raise ValueError("INGEST_GATEWAY_TOKEN must be configured outside development")
+        return self
+
+    @model_validator(mode="after")
+    def reject_default_playback_secret_in_production(self) -> Self:
+        if (
+            self.ENVIRONMENT.lower() in {"production", "staging"}
+            and self.PLAYBACK_SIGNING_SECRET.get_secret_value()
+            == "development-playback-signing-secret"
+        ):
+            raise ValueError("PLAYBACK_SIGNING_SECRET must be configured outside development")
         return self
 
 
