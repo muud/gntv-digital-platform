@@ -7,6 +7,8 @@ from app.api import auth, content, health
 from app.core.config import settings
 from app.core.redis import lifespan
 from app.models import audit, auth_extra, user  # noqa: F401
+from app.modules.chat.api import router as chat_router
+from app.modules.chat.websocket import router as chat_websocket_router
 from app.modules.cms.api import content_router
 from app.modules.cms.media.api import download_router as media_download_router
 from app.modules.cms.media.api import router as media_router
@@ -44,3 +46,5 @@ app.include_router(ingest_router)
 app.include_router(processing_router)
 app.include_router(distribution_router)
 app.include_router(sheeko_xariiro_router)
+app.include_router(chat_router)
+app.include_router(chat_websocket_router)

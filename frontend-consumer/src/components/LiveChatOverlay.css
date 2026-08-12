@@ -1,0 +1,229 @@
+.gntv-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: rgba(12, 12, 14, 0.92);
+  color: #f5f5f4;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+  font-family: inherit;
+}
+
+.gntv-chat__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.gntv-chat__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gntv-chat__title h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.gntv-chat__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #6b7280;
+}
+.gntv-chat__dot--connected { background: #22c55e; }
+.gntv-chat__dot--connecting,
+.gntv-chat__dot--reconnecting { background: #eab308; }
+.gntv-chat__dot--error,
+.gntv-chat__dot--disconnected { background: #ef4444; }
+
+.gntv-chat__status {
+  margin: 0;
+  font-size: 0.72rem;
+  color: rgba(245, 245, 244, 0.6);
+}
+
+.gntv-chat__close {
+  margin-left: auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gntv-chat__alert {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.6rem 1rem;
+  font-size: 0.78rem;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.gntv-chat__notices {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.gntv-chat__notice {
+  font-size: 0.75rem;
+  color: rgba(245, 245, 244, 0.75);
+  border-left: 2px solid rgba(212, 175, 55, 0.7);
+  padding-left: 0.5rem;
+}
+.gntv-chat__notice--ban,
+.gntv-chat__notice--mute { border-left-color: #ef4444; }
+
+.gntv-chat__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.5rem 1rem 1rem;
+}
+
+.gntv-chat__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.gntv-chat__msg {
+  border-radius: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+.gntv-chat__msg.is-flagged { box-shadow: inset 0 0 0 1px rgba(234, 179, 8, 0.6); }
+.gntv-chat__msg.is-failed { box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.6); }
+
+.gntv-chat__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.15rem;
+  font-size: 0.7rem;
+  color: rgba(245, 245, 244, 0.55);
+}
+
+.gntv-chat__user {
+  font-weight: 600;
+  color: #d4af37;
+}
+
+.gntv-chat__body {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.gntv-chat__removed,
+.gntv-chat__empty {
+  margin: 0;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: rgba(245, 245, 244, 0.45);
+}
+
+.gntv-chat__pending { font-size: 0.68rem; }
+
+.gntv-chat__link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #d4af37;
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.gntv-chat__earlier { margin-bottom: 0.75rem; }
+
+.gntv-chat__composer {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.75rem 1rem 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.gntv-chat__composer textarea {
+  width: 100%;
+  resize: none;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.gntv-chat__composer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gntv-chat__count {
+  font-size: 0.68rem;
+  color: rgba(245, 245, 244, 0.5);
+}
+.gntv-chat__count.is-over { color: #fca5a5; }
+
+.gntv-chat__send {
+  border: none;
+  border-radius: 999px;
+  padding: 0.45rem 1.1rem;
+  background: #d4af37;
+  color: #1a1a1a;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.gntv-chat__send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.gntv-chat :focus-visible {
+  outline: 2px solid #d4af37;
+  outline-offset: 2px;
+}
+
+.gntv-chat__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 1023px) {
+  .gntv-chat {
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top-left-radius: 1.25rem;
+    border-top-right-radius: 1.25rem;
+  }
+}

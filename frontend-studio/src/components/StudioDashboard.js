@@ -2,6 +2,7 @@ import { store } from "../../../shared/src/state.js";
 import { VODS, CHANNELS } from "../../../shared/src/utils/mockData.js";
 import { initProcessingCenter } from "./ProcessingCenter.js";
 import { initSheekoXariiroVoiceStudio } from "./SheekoXariiroVoiceStudio.jsx";
+import { initChatModerationConsole } from "./ChatModerationConsole.js";
 
 export function initStudioDashboard(container) {
   let activeSubTab = "upload"; // default module tab
@@ -61,7 +62,8 @@ export function initStudioDashboard(container) {
         { id: "publish", label: "Publish", icon: "🚀" },
         { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" },
         { id: "analytics", label: "Analytics Hub", icon: "📊" },
-        { id: "monetization", label: "Monetization Panel", icon: "💰" }
+        { id: "monetization", label: "Monetization Panel", icon: "💰" },
+        { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
     } else if (userRole === "operator") {
       sidebarTitle = "GNTV DIGITAL, ALL EVERYWHERE Back Office";
@@ -75,7 +77,8 @@ export function initStudioDashboard(container) {
         { id: "channels", label: "Channels", icon: "📡" },
         { id: "scheduling", label: "Scheduling", icon: "📅" },
         { id: "publish", label: "Publish", icon: "🚀" },
-        { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" }
+        { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" },
+        { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
     } else {
       sidebarTitle = "GNTV DIGITAL, ALL EVERYWHERE Creator Studio";
@@ -1101,6 +1104,10 @@ export function initStudioDashboard(container) {
       pane.innerHTML = `<div id="sheeko-xariiro-root"></div>`;
       const mountNode = pane.querySelector("#sheeko-xariiro-root");
       activeTabCleanup = initSheekoXariiroVoiceStudio(mountNode);
+    } else if (activeSubTab === "moderation") {
+      pane.innerHTML = `<div id="chat-moderation-root"></div>`;
+      const mountNode = pane.querySelector("#chat-moderation-root");
+      activeTabCleanup = initChatModerationConsole(mountNode, { roomId: "default-room" });
     }
   };
 

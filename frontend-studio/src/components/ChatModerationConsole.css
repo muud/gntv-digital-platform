@@ -1,0 +1,142 @@
+.gntv-mod {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: 1fr;
+  color: #f5f5f4;
+  font-family: inherit;
+}
+
+@media (min-width: 1024px) {
+  .gntv-mod { grid-template-columns: 2fr 1fr; }
+}
+
+.gntv-mod__panel {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+  padding: 1rem;
+}
+
+.gntv-mod__panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.gntv-mod__status {
+  font-size: 0.72rem;
+  color: rgba(245, 245, 244, 0.6);
+  margin: 0 0 0.75rem;
+}
+
+.gntv-mod__feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+  max-height: 32rem;
+  overflow-y: auto;
+}
+
+.gntv-mod__msg {
+  border-radius: 0.75rem;
+  padding: 0.6rem 0.7rem;
+  background: rgba(255, 255, 255, 0.04);
+}
+.gntv-mod__msg.is-flagged { box-shadow: inset 0 0 0 1px rgba(234, 179, 8, 0.7); }
+
+.gntv-mod__meta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.7rem;
+  color: rgba(245, 245, 244, 0.55);
+  margin: 0 0 0.2rem;
+}
+
+.gntv-mod__user { font-weight: 600; color: #d4af37; }
+
+.gntv-mod__body {
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.gntv-mod__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.gntv-mod__btn {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.28rem 0.75rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.gntv-mod__btn--primary {
+  background: #d4af37;
+  color: #1a1a1a;
+  border-color: transparent;
+  font-weight: 600;
+}
+.gntv-mod__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.gntv-mod__confirm {
+  margin-top: 0.5rem;
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.gntv-mod__input,
+.gntv-mod__select {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.gntv-mod__ok { color: #86efac; font-size: 0.75rem; margin: 0.4rem 0 0; }
+.gntv-mod__err { color: #fca5a5; font-size: 0.75rem; margin: 0.4rem 0 0; }
+
+.gntv-mod__rules {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.gntv-mod__rule {
+  font-size: 0.78rem;
+  border-left: 2px solid rgba(212, 175, 55, 0.7);
+  padding-left: 0.5rem;
+}
+
+.gntv-mod__form { display: grid; gap: 0.45rem; }
+
+.gntv-mod :focus-visible {
+  outline: 2px solid #d4af37;
+  outline-offset: 2px;
+}
+
+.gntv-mod__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
