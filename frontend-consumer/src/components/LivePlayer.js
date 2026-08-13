@@ -102,6 +102,16 @@ export function VisibleWatermark(text = "GNTV • DIGITAL PROTECTED STREAM") {
   `;
 }
 
+export function AdStateOverlay() {
+  return `
+    <div class="ad-state-overlay" id="player-ad-state" hidden aria-live="polite">
+      <span class="ad-pill">Ad</span>
+      <span id="player-ad-position">Ad 1 of 1</span>
+      <span id="player-ad-remaining">Ad playing</span>
+    </div>
+  `;
+}
+
 export function LiveBadge(label = "LIVE") {
   return `
     <div class="live-badge" id="player-live-badge">
@@ -192,6 +202,7 @@ export function initLivePlayer(container) {
           </div>
         </div>
         ${DVRControlsOverlay()}
+        ${AdStateOverlay()}
         ${VisibleWatermark()}
       </div>
 
@@ -254,6 +265,9 @@ export function initLivePlayer(container) {
   const dvrMinus5m = container.querySelector("#btn-dvr-minus-5m");
   const goLiveBtn = container.querySelector("#btn-go-live");
   const catchupBtn = container.querySelector("#btn-catchup");
+  const adStateOverlay = container.querySelector("#player-ad-state");
+  const adPosition = container.querySelector("#player-ad-position");
+  const adRemaining = container.querySelector("#player-ad-remaining");
 
   let abortController = null;
   let hls = null;
@@ -316,6 +330,19 @@ export function initLivePlayer(container) {
     dvrReadout.textContent = dvrMode === "catchup" ? "Catch-up playback" : formatShift(activeTimeShift);
     liveBadgeLabel.textContent = activeTimeShift === 0 && dvrMode === "live" ? "LIVE" : "DVR";
     goLiveBtn.disabled = activeTimeShift === 0 && dvrMode === "live";
+  };
+
+  const updateAdStateUI = state => {
+    if (!state?.active) {
+      adStateOverlay.hidden = true;
+      return;
+    }
+    const index = Number(state.index || 1);
+    const total = Number(state.total || 1);
+    const remaining = Number(state.remainingSeconds || 0);
+    adPosition.textContent = `Ad ${index} of ${total}`;
+    adRemaining.textContent = remaining > 0 ? `${Math.ceil(remaining)}s remaining` : "Ad playing";
+    adStateOverlay.hidden = false;
   };
 
   const updateMuteControl = () => {
@@ -648,6 +675,8 @@ export function initLivePlayer(container) {
     emergencyMsg.textContent = alertState?.message || "BROADCAST OVERRIDE ACTIVATED";
   });
 
+  const unsubAdState = store.subscribe("adPlaybackState", updateAdStateUI);
+
   const heartbeatInterval = window.setInterval(async () => {
     if (!video.paused && activeSessionId) {
       try {
@@ -704,5 +733,6 @@ export function initLivePlayer(container) {
     unsubChannel();
     unsubCamera();
     unsubAlert();
+    unsubAdState();
   };
 }
