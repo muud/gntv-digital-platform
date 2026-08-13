@@ -242,6 +242,36 @@
   color: #dff0ff;
 }
 
+.ad-state-overlay {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(360px, calc(100% - 36px));
+  padding: 8px 11px;
+  border: 1px solid rgba(255, 138, 31, 0.44);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(23, 12, 3, 0.82), rgba(4, 18, 33, 0.72));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34), 0 0 18px rgba(255, 138, 31, 0.12);
+  color: #fff;
+  backdrop-filter: blur(12px);
+  font: 800 10px var(--font-mono);
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+
+.ad-state-overlay[hidden] { display: none; }
+
+.ad-pill {
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: #ff8a1f;
+  color: #120600;
+}
+
 .player-controls {
   min-height: 56px;
   padding: 10px 16px;
@@ -323,6 +353,12 @@
   .dvr-actions { flex-wrap: wrap; }
   .dvr-chip { flex: 1 1 70px; }
   .dvr-readout { text-align: center; }
+  .ad-state-overlay {
+    top: 10px;
+    right: 10px;
+    max-width: calc(100% - 20px);
+    flex-wrap: wrap;
+  }
   .player-protocol-label { display: none; }
   .ticker-title { display: none; }
 }

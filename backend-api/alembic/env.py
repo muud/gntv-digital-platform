@@ -11,6 +11,7 @@ from app.modules.cms import models as cms_models  # noqa: F401
 from app.modules.catalog import models as catalog_models  # noqa: F401
 from app.modules.editorial import models as editorial_models  # noqa: F401
 from app.modules.distribution import models as distribution_models  # noqa: F401
+from app.modules.monetization import models as monetization_models  # noqa: F401
 from app.modules.streaming import models as streaming_models  # noqa: F401
 from app.modules.sheeko_xariiro import models as sheeko_xariiro_models  # noqa: F401
 
