@@ -90,6 +90,31 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("PLAYBACK_PUBLIC_BASE_URL", "ALIBABA_CDN_PLAY_DOMAIN"),
     )
 
+    CDN_SIGNING_SECRET: SecretStr = Field(
+        default=SecretStr("development-cdn-signing-secret"),
+        min_length=16,
+        validation_alias="CDN_SIGNING_SECRET",
+    )
+    CDN_DEFAULT_TTL_SECONDS: int = Field(
+        default=1800,
+        ge=30,
+        le=86400,
+        validation_alias="CDN_DEFAULT_TTL_SECONDS",
+    )
+    CDN_FAILOVER_THRESHOLD: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        validation_alias="CDN_FAILOVER_THRESHOLD",
+    )
+    CDN_COOLDOWN_SECONDS: int = Field(
+        default=60,
+        ge=5,
+        le=3600,
+        validation_alias="CDN_COOLDOWN_SECONDS",
+    )
+
+
     model_config = SettingsConfigDict(
         case_sensitive=False,
         env_file=(".env", "../.env"),
