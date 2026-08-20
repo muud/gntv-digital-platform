@@ -1,4 +1,4 @@
-"""SQLAlchemy models for Global Multi-CDN & Edge Acceleration (Module 7 Sprint 7.3)."""
+"""SQLAlchemy models for Global Multi-CDN, observability, and edge acceleration."""
 
 from __future__ import annotations
 
@@ -50,6 +50,12 @@ class CDNOriginType(StrEnum):
     PRIMARY = "primary"
     SECONDARY = "secondary"
     BACKUP = "backup"
+
+
+class CDNMetricGranularity(StrEnum):
+    RAW = "raw"
+    HOURLY = "hourly"
+    DAILY = "daily"
 
 
 class CDNOrigin(Base):
@@ -118,6 +124,12 @@ class CDNEndpoint(Base):
     routing_events: Mapped[list[CDNRoutingEvent]] = relationship(
         "CDNRoutingEvent", back_populates="endpoint"
     )
+    endpoint_metrics: Mapped[list[CDNEndpointMetric]] = relationship(
+        "CDNEndpointMetric", back_populates="endpoint", cascade="all, delete-orphan"
+    )
+    traffic_overrides: Mapped[list[CDNTrafficAllocationOverride]] = relationship(
+        "CDNTrafficAllocationOverride", back_populates="endpoint", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_cdn_endpoints_routing", "is_enabled", "health_status", "priority"),
@@ -156,3 +168,146 @@ class CDNRoutingEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, index=True)
 
     endpoint: Mapped[CDNEndpoint | None] = relationship("CDNEndpoint", back_populates="routing_events")
+
+
+class CDNEndpointMetric(Base):
+    """Observed traffic, cache, latency, error, and health metrics for an endpoint."""
+
+    __tablename__ = "cdn_endpoint_metrics"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    endpoint_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("cdn_endpoints.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_type: Mapped[CDNProviderType] = mapped_column(
+        enum_type(CDNProviderType, "cdn_provider_type_enum"),
+        nullable=False,
+    )
+    region_code: Mapped[str] = mapped_column(String(32), nullable=False, default="global")
+    granularity: Mapped[CDNMetricGranularity] = mapped_column(
+        enum_type(CDNMetricGranularity, "cdn_metric_granularity_enum"),
+        nullable=False,
+        default=CDNMetricGranularity.RAW,
+    )
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bandwidth_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_miss_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    origin_fetch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    avg_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    p95_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    http_4xx_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    http_5xx_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    health_status: Mapped[CDNHealthStatus] = mapped_column(
+        enum_type(CDNHealthStatus, "cdn_health_status_enum"),
+        nullable=False,
+        default=CDNHealthStatus.HEALTHY,
+    )
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    endpoint: Mapped[CDNEndpoint] = relationship("CDNEndpoint", back_populates="endpoint_metrics")
+
+    __table_args__ = (
+        Index("ix_cdn_endpoint_metrics_endpoint_window", "endpoint_id", "granularity", "window_start"),
+        Index("ix_cdn_endpoint_metrics_provider_region", "provider_type", "region_code", "window_start"),
+    )
+
+
+class CDNProviderMetric(Base):
+    """Aggregated provider-level CDN metrics for hourly/daily observability."""
+
+    __tablename__ = "cdn_provider_metrics"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    provider_type: Mapped[CDNProviderType] = mapped_column(
+        enum_type(CDNProviderType, "cdn_provider_type_enum"),
+        nullable=False,
+    )
+    region_code: Mapped[str] = mapped_column(String(32), nullable=False, default="global")
+    granularity: Mapped[CDNMetricGranularity] = mapped_column(
+        enum_type(CDNMetricGranularity, "cdn_metric_granularity_enum"),
+        nullable=False,
+        default=CDNMetricGranularity.HOURLY,
+    )
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bandwidth_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_hit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_miss_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    origin_fetch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    avg_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    p95_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    http_4xx_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    http_5xx_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    health_status: Mapped[CDNHealthStatus] = mapped_column(
+        enum_type(CDNHealthStatus, "cdn_health_status_enum"),
+        nullable=False,
+        default=CDNHealthStatus.HEALTHY,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    __table_args__ = (
+        Index("ix_cdn_provider_metrics_provider_window", "provider_type", "granularity", "window_start"),
+        Index("ix_cdn_provider_metrics_region_window", "region_code", "granularity", "window_start"),
+    )
+
+
+class CDNFailoverEvent(Base):
+    """Observed failover event generated by health/routing automation."""
+
+    __tablename__ = "cdn_failover_events"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    from_endpoint_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("cdn_endpoints.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    to_endpoint_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("cdn_endpoints.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    provider_type: Mapped[CDNProviderType | None] = mapped_column(
+        enum_type(CDNProviderType, "cdn_provider_type_enum"),
+        nullable=True,
+    )
+    region_code: Mapped[str] = mapped_column(String(32), nullable=False, default="global")
+    asset_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    decision_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, index=True)
+
+
+class CDNTrafficAllocationOverride(Base):
+    """Operator-controlled traffic allocation override for a provider or endpoint."""
+
+    __tablename__ = "cdn_traffic_allocation_overrides"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    endpoint_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("cdn_endpoints.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider_type: Mapped[CDNProviderType | None] = mapped_column(
+        enum_type(CDNProviderType, "cdn_provider_type_enum"),
+        nullable=True,
+    )
+    region_code: Mapped[str] = mapped_column(String(32), nullable=False, default="global")
+    allocation_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    endpoint: Mapped[CDNEndpoint | None] = relationship("CDNEndpoint", back_populates="traffic_overrides")
+
+    __table_args__ = (
+        Index("ix_cdn_traffic_overrides_active_region", "is_active", "region_code", "starts_at", "ends_at"),
+    )

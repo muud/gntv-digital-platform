@@ -11,12 +11,23 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.modules.cdn.models import (
     CDNEndpoint,
+    CDNEndpointMetric,
+    CDNFailoverEvent,
     CDNHealthCheck,
     CDNHealthStatus,
+    CDNMetricGranularity,
     CDNOrigin,
+    CDNProviderMetric,
     CDNRoutingEvent,
+    CDNTrafficAllocationOverride,
 )
-from app.modules.cdn.schemas import CDNEndpointCreate, CDNOriginCreate
+from app.modules.cdn.schemas import (
+    CDNEndpointCreate,
+    CDNEndpointMetricCreate,
+    CDNFailoverEventCreate,
+    CDNOriginCreate,
+    CDNTrafficAllocationOverrideCreate,
+)
 
 
 def utc_now() -> datetime:
@@ -172,3 +183,132 @@ class CDNRepository:
         self.db.commit()
         self.db.refresh(event)
         return event
+
+    def list_routing_events(self, limit: int = 100) -> list[CDNRoutingEvent]:
+        stmt = (
+            select(CDNRoutingEvent)
+            .options(joinedload(CDNRoutingEvent.endpoint))
+            .order_by(CDNRoutingEvent.created_at.desc())
+            .limit(limit)
+        )
+        return list(self.db.scalars(stmt).all())
+
+    # Observability metrics
+    def create_endpoint_metric(self, data: CDNEndpointMetricCreate) -> CDNEndpointMetric:
+        endpoint = self.get_endpoint(data.endpoint_id)
+        if not endpoint:
+            raise ValueError("CDN endpoint not found")
+        metric = CDNEndpointMetric(
+            endpoint_id=endpoint.id,
+            provider_type=endpoint.provider_type,
+            region_code=data.region_code,
+            granularity=data.granularity,
+            window_start=data.window_start,
+            window_end=data.window_end,
+            request_count=data.request_count,
+            bandwidth_bytes=data.bandwidth_bytes,
+            cache_hit_count=data.cache_hit_count,
+            cache_miss_count=data.cache_miss_count,
+            origin_fetch_count=data.origin_fetch_count,
+            avg_latency_ms=data.avg_latency_ms,
+            p95_latency_ms=data.p95_latency_ms,
+            http_4xx_count=data.http_4xx_count,
+            http_5xx_count=data.http_5xx_count,
+            health_status=data.health_status,
+            observed_at=utc_now(),
+        )
+        self.db.add(metric)
+        self.db.commit()
+        self.db.refresh(metric)
+        return metric
+
+    def list_endpoint_metrics(
+        self,
+        granularity: CDNMetricGranularity | None = None,
+        region_code: str | None = None,
+        limit: int = 500,
+    ) -> list[CDNEndpointMetric]:
+        stmt = select(CDNEndpointMetric).options(joinedload(CDNEndpointMetric.endpoint))
+        if granularity:
+            stmt = stmt.where(CDNEndpointMetric.granularity == granularity)
+        if region_code:
+            stmt = stmt.where(CDNEndpointMetric.region_code == region_code)
+        stmt = stmt.order_by(CDNEndpointMetric.window_start.desc()).limit(limit)
+        return list(self.db.scalars(stmt).all())
+
+    def create_provider_metric(
+        self,
+        provider_metric: CDNProviderMetric,
+    ) -> CDNProviderMetric:
+        self.db.add(provider_metric)
+        self.db.commit()
+        self.db.refresh(provider_metric)
+        return provider_metric
+
+    def list_provider_metrics(
+        self,
+        granularity: CDNMetricGranularity | None = None,
+        region_code: str | None = None,
+        limit: int = 500,
+    ) -> list[CDNProviderMetric]:
+        stmt = select(CDNProviderMetric)
+        if granularity:
+            stmt = stmt.where(CDNProviderMetric.granularity == granularity)
+        if region_code:
+            stmt = stmt.where(CDNProviderMetric.region_code == region_code)
+        stmt = stmt.order_by(CDNProviderMetric.window_start.desc()).limit(limit)
+        return list(self.db.scalars(stmt).all())
+
+    def create_failover_event(self, data: CDNFailoverEventCreate) -> CDNFailoverEvent:
+        event = CDNFailoverEvent(
+            from_endpoint_id=data.from_endpoint_id,
+            to_endpoint_id=data.to_endpoint_id,
+            provider_type=data.provider_type,
+            region_code=data.region_code,
+            asset_id=data.asset_id,
+            reason=data.reason,
+            decision_metadata_json=data.decision_metadata_json,
+        )
+        self.db.add(event)
+        self.db.commit()
+        self.db.refresh(event)
+        return event
+
+    def list_failover_events(self, limit: int = 100) -> list[CDNFailoverEvent]:
+        stmt = select(CDNFailoverEvent).order_by(CDNFailoverEvent.created_at.desc()).limit(limit)
+        return list(self.db.scalars(stmt).all())
+
+    def create_traffic_override(
+        self,
+        data: CDNTrafficAllocationOverrideCreate,
+        created_by_user_id: int | None,
+    ) -> CDNTrafficAllocationOverride:
+        override = CDNTrafficAllocationOverride(
+            endpoint_id=data.endpoint_id,
+            provider_type=data.provider_type,
+            region_code=data.region_code,
+            allocation_percent=data.allocation_percent,
+            reason=data.reason,
+            starts_at=data.starts_at or utc_now(),
+            ends_at=data.ends_at,
+            created_by_user_id=created_by_user_id,
+            is_active=True,
+        )
+        self.db.add(override)
+        self.db.commit()
+        self.db.refresh(override)
+        return override
+
+    def list_active_traffic_overrides(self, region_code: str | None = None) -> list[CDNTrafficAllocationOverride]:
+        now = utc_now()
+        stmt = select(CDNTrafficAllocationOverride).where(
+            CDNTrafficAllocationOverride.is_active.is_(True),
+            CDNTrafficAllocationOverride.starts_at <= now,
+        )
+        stmt = stmt.where(
+            (CDNTrafficAllocationOverride.ends_at.is_(None)) | (CDNTrafficAllocationOverride.ends_at > now)
+        )
+        if region_code:
+            stmt = stmt.where(CDNTrafficAllocationOverride.region_code == region_code)
+        stmt = stmt.order_by(CDNTrafficAllocationOverride.created_at.desc())
+        return list(self.db.scalars(stmt).all())
