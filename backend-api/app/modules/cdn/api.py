@@ -10,21 +10,46 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user, require_role
 from app.models.user import User
+from app.modules.cdn.analytics import CDNObservabilityService
 from app.modules.cdn.models import CDNProviderType
 from app.modules.cdn.schemas import (
     CDNEndpointCreate,
+    CDNEndpointAnalytics,
+    CDNEndpointMetricCreate,
+    CDNEndpointMetricResponse,
     CDNEndpointResponse,
+    CDNFailoverEventCreate,
+    CDNFailoverEventResponse,
     CDNHealthSummary,
     CDNHealthUpdate,
+    CDNObservabilityOverview,
+    CDNOperationalMetrics,
     CDNOriginCreate,
     CDNOriginResponse,
+    CDNProviderAnalytics,
+    CDNRegionAnalytics,
     CDNRouteResponse,
+    CDNRoutingEventResponse,
     CDNSignedUrlRequest,
     CDNSignedUrlResponse,
+    CDNTrafficAllocationOverrideCreate,
+    CDNTrafficAllocationOverrideResponse,
+    CDNTrafficAllocationResponse,
 )
+from app.modules.cdn.repository import CDNRepository
 from app.modules.cdn.service import CDNService
 
 router = APIRouter(prefix="/api/v1/cdn", tags=["Global Multi-CDN"])
+
+
+def require_cdn_operator(current_user: User = Depends(get_current_user)) -> User:
+    """Require an admin or CDN operator role for observability controls."""
+    if {"admin", "operator"} & set(current_user.role_names):
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin or operator role required",
+    )
 
 
 @router.get(
@@ -203,3 +228,172 @@ def sign_edge_url(
         provider_type=endpoints[0].provider_type if endpoints else CDNProviderType.ALIBABA_DCDN,
         signature_algorithm="HMAC-SHA256",
     )
+
+
+@router.post(
+    "/observability/metrics",
+    response_model=CDNEndpointMetricResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ingest CDN endpoint observability metrics",
+)
+def ingest_endpoint_metrics(
+    payload: CDNEndpointMetricCreate,
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> CDNEndpointMetricResponse:
+    """Persist endpoint metrics for analytics, monitoring, and deterministic optimization."""
+    del current_user
+    service = CDNObservabilityService(CDNRepository(db))
+    try:
+        return service.ingest_endpoint_metric(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+
+@router.get(
+    "/observability/overview",
+    response_model=CDNObservabilityOverview,
+    summary="Get CDN observability overview",
+)
+def observability_overview(
+    region_code: str | None = Query(default=None, max_length=32),
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> CDNObservabilityOverview:
+    """Return aggregate request, bandwidth, cache, latency, health, and failover metrics."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).overview(region_code=region_code)
+
+
+@router.get(
+    "/observability/providers",
+    response_model=list[CDNProviderAnalytics],
+    summary="Get provider-level CDN analytics",
+)
+def provider_analytics(
+    region_code: str | None = Query(default=None, max_length=32),
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> list[CDNProviderAnalytics]:
+    """Return provider rollups by region."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).provider_analytics(region_code=region_code)
+
+
+@router.get(
+    "/observability/endpoints",
+    response_model=list[CDNEndpointAnalytics],
+    summary="Get endpoint-level CDN analytics",
+)
+def endpoint_analytics(
+    region_code: str | None = Query(default=None, max_length=32),
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> list[CDNEndpointAnalytics]:
+    """Return endpoint health, metrics, and routing score summaries."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).endpoint_analytics(region_code=region_code)
+
+
+@router.get(
+    "/observability/regions",
+    response_model=list[CDNRegionAnalytics],
+    summary="Get regional CDN analytics",
+)
+def region_analytics(
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> list[CDNRegionAnalytics]:
+    """Return aggregate CDN metrics grouped by region code."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).region_analytics()
+
+
+@router.get(
+    "/observability/routing-events",
+    response_model=list[CDNRoutingEventResponse],
+    summary="Get CDN routing event history",
+)
+def routing_event_history(
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> list[CDNRoutingEventResponse]:
+    """Return recent routing decisions for audit and optimization review."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).routing_events(limit=limit)
+
+
+@router.post(
+    "/observability/failover-history",
+    response_model=CDNFailoverEventResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a CDN failover event",
+)
+def record_failover_event(
+    payload: CDNFailoverEventCreate,
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> CDNFailoverEventResponse:
+    """Record failover metadata for operator review and metrics history."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).record_failover_event(payload)
+
+
+@router.get(
+    "/observability/failover-history",
+    response_model=list[CDNFailoverEventResponse],
+    summary="Get CDN failover history",
+)
+def failover_history(
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> list[CDNFailoverEventResponse]:
+    """Return recent CDN failover events."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).failover_history(limit=limit)
+
+
+@router.post(
+    "/observability/traffic-overrides",
+    response_model=CDNTrafficAllocationOverrideResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an operator traffic allocation override",
+)
+def create_traffic_override(
+    payload: CDNTrafficAllocationOverrideCreate,
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> CDNTrafficAllocationOverrideResponse:
+    """Create a bounded operator override used by allocation recommendations."""
+    return CDNObservabilityService(CDNRepository(db)).create_operator_override(payload, current_user.id)
+
+
+@router.get(
+    "/observability/traffic-allocation",
+    response_model=CDNTrafficAllocationResponse,
+    summary="Get CDN traffic allocation recommendations",
+)
+def traffic_allocation_recommendations(
+    region_code: str = Query(default="global", max_length=32),
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> CDNTrafficAllocationResponse:
+    """Return deterministic endpoint allocation percentages from health and performance metrics."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).traffic_allocation_recommendations(region_code=region_code)
+
+
+@router.get(
+    "/metrics",
+    response_model=CDNOperationalMetrics,
+    summary="Get operational CDN metrics for monitoring integration",
+)
+def operational_metrics(
+    current_user: User = Depends(require_cdn_operator),
+    db: Session = Depends(get_db),
+) -> CDNOperationalMetrics:
+    """Expose aggregate application/CDN operational metrics."""
+    del current_user
+    return CDNObservabilityService(CDNRepository(db)).operational_metrics()

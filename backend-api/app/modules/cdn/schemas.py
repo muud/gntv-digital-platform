@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.cdn.models import CDNHealthStatus, CDNOriginType, CDNProviderType
+from app.modules.cdn.models import CDNHealthStatus, CDNMetricGranularity, CDNOriginType, CDNProviderType
 
 
 class CDNOriginBase(BaseModel):
@@ -147,3 +147,145 @@ class CDNRoutingEventResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CDNEndpointMetricCreate(BaseModel):
+    endpoint_id: UUID
+    region_code: str = Field(default="global", max_length=32)
+    granularity: CDNMetricGranularity = CDNMetricGranularity.RAW
+    window_start: datetime
+    window_end: datetime
+    request_count: int = Field(default=0, ge=0)
+    bandwidth_bytes: int = Field(default=0, ge=0)
+    cache_hit_count: int = Field(default=0, ge=0)
+    cache_miss_count: int = Field(default=0, ge=0)
+    origin_fetch_count: int = Field(default=0, ge=0)
+    avg_latency_ms: float = Field(default=0.0, ge=0.0)
+    p95_latency_ms: float = Field(default=0.0, ge=0.0)
+    http_4xx_count: int = Field(default=0, ge=0)
+    http_5xx_count: int = Field(default=0, ge=0)
+    health_status: CDNHealthStatus = CDNHealthStatus.HEALTHY
+
+
+class CDNEndpointMetricResponse(CDNEndpointMetricCreate):
+    id: UUID
+    provider_type: CDNProviderType
+    observed_at: datetime
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CDNMetricSummary(BaseModel):
+    request_count: int
+    bandwidth_bytes: int
+    cache_hit_ratio: float
+    origin_offload_ratio: float
+    avg_latency_ms: float
+    p95_latency_ms: float
+    http_error_rate: float
+    http_4xx_count: int
+    http_5xx_count: int
+    health_status: CDNHealthStatus
+
+
+class CDNEndpointAnalytics(BaseModel):
+    endpoint_id: UUID
+    edge_hostname: str
+    provider_type: CDNProviderType
+    region_code: str
+    is_enabled: bool
+    health_status: CDNHealthStatus
+    score: float
+    metrics: CDNMetricSummary
+
+
+class CDNProviderAnalytics(BaseModel):
+    provider_type: CDNProviderType
+    region_code: str
+    endpoint_count: int
+    healthy_endpoint_count: int
+    metrics: CDNMetricSummary
+
+
+class CDNRegionAnalytics(BaseModel):
+    region_code: str
+    provider_count: int
+    endpoint_count: int
+    metrics: CDNMetricSummary
+
+
+class CDNObservabilityOverview(BaseModel):
+    generated_at: datetime
+    provider_count: int
+    endpoint_count: int
+    healthy_endpoint_count: int
+    degraded_endpoint_count: int
+    unhealthy_endpoint_count: int
+    failover_count: int
+    metrics: CDNMetricSummary
+
+
+class CDNFailoverEventCreate(BaseModel):
+    from_endpoint_id: UUID | None = None
+    to_endpoint_id: UUID | None = None
+    provider_type: CDNProviderType | None = None
+    region_code: str = Field(default="global", max_length=32)
+    asset_id: str | None = Field(default=None, max_length=255)
+    reason: str = Field(..., min_length=1, max_length=255)
+    decision_metadata_json: dict[str, Any] | None = None
+
+
+class CDNFailoverEventResponse(CDNFailoverEventCreate):
+    id: UUID
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CDNTrafficAllocationOverrideCreate(BaseModel):
+    endpoint_id: UUID | None = None
+    provider_type: CDNProviderType | None = None
+    region_code: str = Field(default="global", max_length=32)
+    allocation_percent: float = Field(..., ge=0.0, le=100.0)
+    reason: str = Field(..., min_length=1, max_length=255)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class CDNTrafficAllocationOverrideResponse(CDNTrafficAllocationOverrideCreate):
+    id: UUID
+    is_active: bool
+    created_by_user_id: int | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CDNTrafficAllocationRecommendation(BaseModel):
+    endpoint_id: UUID
+    edge_hostname: str
+    provider_type: CDNProviderType
+    region_code: str
+    allocation_percent: float
+    score: float
+    health_status: CDNHealthStatus
+    reason: str
+    operator_override: bool = False
+
+
+class CDNTrafficAllocationResponse(BaseModel):
+    generated_at: datetime
+    region_code: str
+    recommendations: list[CDNTrafficAllocationRecommendation]
+
+
+class CDNOperationalMetrics(BaseModel):
+    generated_at: datetime
+    cdn_requests_total: int
+    cdn_bandwidth_bytes_total: int
+    cdn_cache_hit_ratio: float
+    cdn_origin_offload_ratio: float
+    cdn_http_error_rate: float
+    cdn_endpoint_health: dict[str, int]
