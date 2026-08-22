@@ -3,6 +3,7 @@ import { VODS, CHANNELS } from "../../../shared/src/utils/mockData.js";
 import { initProcessingCenter } from "./ProcessingCenter.js";
 import { initSheekoXariiroVoiceStudio } from "./SheekoXariiroVoiceStudio.jsx";
 import { initChatModerationConsole } from "./ChatModerationConsole.js";
+import { initExecutiveAnalyticsDashboard } from "./ExecutiveAnalyticsDashboard.js";
 
 export function initStudioDashboard(container) {
   let activeSubTab = "upload"; // default module tab
@@ -62,6 +63,7 @@ export function initStudioDashboard(container) {
         { id: "publish", label: "Publish", icon: "🚀" },
         { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" },
         { id: "analytics", label: "Analytics Hub", icon: "📊" },
+        { id: "executive-analytics", label: "Executive Analytics", icon: "📈" },
         { id: "monetization", label: "Monetization Panel", icon: "💰" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
@@ -78,6 +80,7 @@ export function initStudioDashboard(container) {
         { id: "scheduling", label: "Scheduling", icon: "📅" },
         { id: "publish", label: "Publish", icon: "🚀" },
         { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" },
+        { id: "executive-analytics", label: "Executive Analytics", icon: "📈" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
     } else {
@@ -1100,6 +1103,10 @@ export function initStudioDashboard(container) {
       pane.innerHTML = `<div id="proc-noc-root"></div>`;
       const mountNode = pane.querySelector("#proc-noc-root");
       activeTabCleanup = initProcessingCenter(mountNode);
+    } else if (activeSubTab === "executive-analytics") {
+      pane.innerHTML = `<div id="executive-analytics-root"></div>`;
+      const mountNode = pane.querySelector("#executive-analytics-root");
+      activeTabCleanup = initExecutiveAnalyticsDashboard(mountNode);
     } else if (activeSubTab === "sheeko-voice") {
       pane.innerHTML = `<div id="sheeko-xariiro-root"></div>`;
       const mountNode = pane.querySelector("#sheeko-xariiro-root");
