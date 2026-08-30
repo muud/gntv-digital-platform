@@ -114,6 +114,24 @@ class Settings(BaseSettings):
         validation_alias="CDN_COOLDOWN_SECONDS",
     )
 
+    EMBED_SIGNING_SECRET: SecretStr = Field(
+        default=SecretStr("development-partner-embed-signing-secret"),
+        min_length=32,
+        validation_alias="EMBED_SIGNING_SECRET",
+    )
+    EMBED_TOKEN_TTL_SECONDS: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        validation_alias="EMBED_TOKEN_TTL_SECONDS",
+    )
+    EMBED_TOKEN_MAX_TTL_SECONDS: int = Field(
+        default=900,
+        ge=30,
+        le=3600,
+        validation_alias="EMBED_TOKEN_MAX_TTL_SECONDS",
+    )
+
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
@@ -158,6 +176,16 @@ class Settings(BaseSettings):
             == "development-playback-signing-secret"
         ):
             raise ValueError("PLAYBACK_SIGNING_SECRET must be configured outside development")
+        return self
+
+    @model_validator(mode="after")
+    def reject_default_embed_secret_in_production(self) -> Self:
+        if (
+            self.ENVIRONMENT.lower() in {"production", "staging"}
+            and self.EMBED_SIGNING_SECRET.get_secret_value()
+            == "development-partner-embed-signing-secret"
+        ):
+            raise ValueError("EMBED_SIGNING_SECRET must be configured outside development")
         return self
 
 
