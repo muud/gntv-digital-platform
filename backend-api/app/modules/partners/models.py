@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, JSON, Numeric, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -54,6 +55,35 @@ class PartnerEmbedEventType(StrEnum):
     PLAYBACK_ERROR = "playback_error"
 
 
+class PartnerUsageEventType(StrEnum):
+    PLAYBACK_START = "playback_start"
+    PLAYBACK_COMPLETE = "playback_complete"
+    AD_IMPRESSION = "ad_impression"
+    AD_COMPLETE = "ad_complete"
+    AD_REVENUE = "ad_revenue"
+    ADJUSTMENT = "adjustment"
+
+
+class RevenueShareRuleType(StrEnum):
+    FIXED_PERCENTAGE = "fixed_percentage"
+    TIERED_PERCENTAGE = "tiered_percentage"
+
+
+class SettlementStatus(StrEnum):
+    DRAFT = "draft"
+    FINALIZED = "finalized"
+    PAID = "paid"
+    DISPUTED = "disputed"
+    VOID = "void"
+
+
+class PartnerFinancialAuditAction(StrEnum):
+    USAGE_RECORDED = "usage_recorded"
+    AGREEMENT_CREATED = "agreement_created"
+    SETTLEMENT_GENERATED = "settlement_generated"
+    SETTLEMENT_STATUS_CHANGED = "settlement_status_changed"
+
+
 class Partner(Base):
     """B2B partner organization allowed to syndicate GNTV content."""
 
@@ -89,6 +119,15 @@ class Partner(Base):
         "PartnerBranding", back_populates="partner", cascade="all, delete-orphan", uselist=False
     )
     embed_events: Mapped[list[PartnerEmbedEvent]] = relationship("PartnerEmbedEvent", back_populates="partner")
+    revenue_share_agreements: Mapped[list[PartnerRevenueShareAgreement]] = relationship(
+        "PartnerRevenueShareAgreement", back_populates="partner", cascade="all, delete-orphan"
+    )
+    usage_metering: Mapped[list[PartnerUsageMeter]] = relationship(
+        "PartnerUsageMeter", back_populates="partner", cascade="all, delete-orphan"
+    )
+    settlement_statements: Mapped[list[PartnerSettlementStatement]] = relationship(
+        "PartnerSettlementStatement", back_populates="partner", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_partners_status_created", "status", "created_at"),)
 
@@ -221,3 +260,128 @@ class PartnerEmbedEvent(Base):
         Index("ix_partner_embed_events_partner_created", "partner_id", "created_at"),
         Index("ix_partner_embed_events_content_created", "content_type", "content_id", "created_at"),
     )
+
+
+class PartnerRevenueShareAgreement(Base):
+    """Configurable financial agreement for partner settlement calculations."""
+
+    __tablename__ = "partner_revenue_share_agreements"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    rule_type: Mapped[RevenueShareRuleType] = mapped_column(
+        enum_type(RevenueShareRuleType, "partner_revenue_share_rule_type_enum"),
+        nullable=False,
+    )
+    fixed_partner_percentage: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    tiers_json: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="revenue_share_agreements")
+
+    __table_args__ = (
+        Index("ix_partner_revshare_partner_active", "partner_id", "is_active", "starts_at", "ends_at"),
+    )
+
+
+class PartnerUsageMeter(Base):
+    """Persisted usage and monetization input used for billing."""
+
+    __tablename__ = "partner_usage_metering"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    content_type: Mapped[PartnerContentType] = mapped_column(
+        enum_type(PartnerContentType, "partner_content_type_enum"),
+        nullable=False,
+    )
+    content_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    usage_event_type: Mapped[PartnerUsageEventType] = mapped_column(
+        enum_type(PartnerUsageEventType, "partner_usage_event_type_enum"),
+        nullable=False,
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    gross_revenue_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0.000000"))
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    source_event_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="usage_metering")
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "idempotency_key", name="uq_partner_usage_idempotency"),
+        Index("ix_partner_usage_partner_period", "partner_id", "occurred_at"),
+        Index("ix_partner_usage_content_period", "content_type", "content_id", "occurred_at"),
+    )
+
+
+class PartnerSettlementStatement(Base):
+    """Immutable billing-period statement once finalized."""
+
+    __tablename__ = "partner_settlement_statements"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    agreement_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("partner_revenue_share_agreements.id", ondelete="RESTRICT"), nullable=False
+    )
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    gross_revenue_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0.000000"))
+    platform_share_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0.000000"))
+    partner_share_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0.000000"))
+    adjustment_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0.000000"))
+    net_settlement_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, default=Decimal("0.000000"))
+    status: Mapped[SettlementStatus] = mapped_column(
+        enum_type(SettlementStatus, "partner_settlement_status_enum"),
+        nullable=False,
+        default=SettlementStatus.DRAFT,
+    )
+    calculation_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    generated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="settlement_statements")
+    agreement: Mapped[PartnerRevenueShareAgreement] = relationship("PartnerRevenueShareAgreement")
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "period_start", "period_end", "currency", name="uq_partner_settlement_period"),
+        UniqueConstraint("partner_id", "idempotency_key", name="uq_partner_settlement_idempotency"),
+        Index("ix_partner_settlement_status_period", "status", "period_start", "period_end"),
+    )
+
+
+class PartnerFinancialAuditLog(Base):
+    """Audit trail for financial state changes."""
+
+    __tablename__ = "partner_financial_audit_logs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    statement_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("partner_settlement_statements.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[PartnerFinancialAuditAction] = mapped_column(
+        enum_type(PartnerFinancialAuditAction, "partner_financial_audit_action_enum"),
+        nullable=False,
+    )
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    before_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    after_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    __table_args__ = (Index("ix_partner_financial_audit_partner_created", "partner_id", "created_at"),)

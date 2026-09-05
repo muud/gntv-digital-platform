@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.modules.partners.models import (
     PartnerContentType,
     PartnerEmbedEventType,
     PartnerEntitlementStatus,
+    PartnerFinancialAuditAction,
     PartnerStatus,
+    PartnerUsageEventType,
+    RevenueShareRuleType,
+    SettlementStatus,
 )
 
 
@@ -198,3 +203,135 @@ class PartnerAnalyticsOverview(BaseModel):
     playback_start_count: int
     completion_count: int
     error_count: int
+
+
+class RevenueShareTier(BaseModel):
+    threshold_amount: Decimal = Field(..., ge=Decimal("0"))
+    partner_percentage: Decimal = Field(..., ge=Decimal("0"), le=Decimal("1"))
+
+
+class PartnerRevenueShareAgreementCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=160)
+    rule_type: RevenueShareRuleType
+    fixed_partner_percentage: Decimal | None = Field(None, ge=Decimal("0"), le=Decimal("1"))
+    tiers: list[RevenueShareTier] | None = None
+    currency: str = Field("USD", min_length=3, max_length=3)
+    starts_at: datetime
+    ends_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_rule(self) -> "PartnerRevenueShareAgreementCreate":
+        if self.ends_at and self.starts_at >= self.ends_at:
+            raise ValueError("starts_at must be before ends_at")
+        if self.rule_type == RevenueShareRuleType.FIXED_PERCENTAGE and self.fixed_partner_percentage is None:
+            raise ValueError("fixed_partner_percentage is required for fixed rules")
+        if self.rule_type == RevenueShareRuleType.TIERED_PERCENTAGE:
+            if not self.tiers:
+                raise ValueError("tiers are required for tiered rules")
+            thresholds = [tier.threshold_amount for tier in self.tiers]
+            if thresholds != sorted(thresholds):
+                raise ValueError("tiers must be sorted by threshold_amount")
+        return self
+
+
+class PartnerRevenueShareAgreementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    name: str
+    rule_type: RevenueShareRuleType
+    fixed_partner_percentage: Decimal | None
+    tiers_json: list[dict[str, str]] | None
+    currency: str
+    starts_at: datetime
+    ends_at: datetime | None
+    is_active: bool
+    created_by_user_id: int | None
+    created_at: datetime
+
+
+class PartnerUsageMeterCreate(BaseModel):
+    content_type: PartnerContentType
+    content_id: str = Field(..., min_length=1, max_length=255)
+    usage_event_type: PartnerUsageEventType
+    quantity: int = Field(1, ge=1, le=1_000_000)
+    gross_revenue_amount: Decimal = Field(Decimal("0"), ge=Decimal("0"))
+    currency: str = Field("USD", min_length=3, max_length=3)
+    source_event_id: str | None = Field(None, max_length=160)
+    idempotency_key: str = Field(..., min_length=8, max_length=160)
+    occurred_at: datetime
+    metadata_json: dict[str, object] | None = None
+
+
+class PartnerUsageMeterResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    content_type: PartnerContentType
+    content_id: str
+    usage_event_type: PartnerUsageEventType
+    quantity: int
+    gross_revenue_amount: Decimal
+    currency: str
+    source_event_id: str | None
+    idempotency_key: str
+    occurred_at: datetime
+    created_at: datetime
+
+
+class PartnerSettlementGenerateRequest(BaseModel):
+    period_start: datetime
+    period_end: datetime
+    currency: str = Field("USD", min_length=3, max_length=3)
+    adjustment_amount: Decimal = Decimal("0")
+    idempotency_key: str = Field(..., min_length=8, max_length=160)
+
+    @model_validator(mode="after")
+    def validate_period(self) -> "PartnerSettlementGenerateRequest":
+        if self.period_start >= self.period_end:
+            raise ValueError("period_start must be before period_end")
+        return self
+
+
+class PartnerSettlementStatusUpdate(BaseModel):
+    status: SettlementStatus
+    reason: str | None = Field(None, max_length=500)
+
+
+class PartnerSettlementStatementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    agreement_id: UUID
+    period_start: datetime
+    period_end: datetime
+    currency: str
+    usage_count: int
+    gross_revenue_amount: Decimal
+    platform_share_amount: Decimal
+    partner_share_amount: Decimal
+    adjustment_amount: Decimal
+    net_settlement_amount: Decimal
+    status: SettlementStatus
+    calculation_json: dict[str, object]
+    idempotency_key: str
+    generated_by_user_id: int | None
+    generated_at: datetime
+    finalized_at: datetime | None
+    paid_at: datetime | None
+
+
+class PartnerFinancialAuditLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    statement_id: UUID | None
+    action: PartnerFinancialAuditAction
+    actor_user_id: int | None
+    before_json: dict[str, object] | None
+    after_json: dict[str, object] | None
+    created_at: datetime

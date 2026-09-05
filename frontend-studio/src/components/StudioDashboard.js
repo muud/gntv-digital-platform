@@ -4,6 +4,7 @@ import { initProcessingCenter } from "./ProcessingCenter.js";
 import { initSheekoXariiroVoiceStudio } from "./SheekoXariiroVoiceStudio.jsx";
 import { initChatModerationConsole } from "./ChatModerationConsole.js";
 import { initExecutiveAnalyticsDashboard } from "./ExecutiveAnalyticsDashboard.js";
+import { initPartnerSyndicationDashboard } from "./PartnerSyndicationDashboard.js";
 
 export function initStudioDashboard(container) {
   let activeSubTab = "upload"; // default module tab
@@ -64,6 +65,7 @@ export function initStudioDashboard(container) {
         { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" },
         { id: "analytics", label: "Analytics Hub", icon: "📊" },
         { id: "executive-analytics", label: "Executive Analytics", icon: "📈" },
+        { id: "partner-syndication", label: "Partner Syndication", icon: "🔗" },
         { id: "monetization", label: "Monetization Panel", icon: "💰" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
@@ -81,6 +83,7 @@ export function initStudioDashboard(container) {
         { id: "publish", label: "Publish", icon: "🚀" },
         { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" },
         { id: "executive-analytics", label: "Executive Analytics", icon: "📈" },
+        { id: "partner-syndication", label: "Partner Syndication", icon: "🔗" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
     } else {
@@ -1107,6 +1110,10 @@ export function initStudioDashboard(container) {
       pane.innerHTML = `<div id="executive-analytics-root"></div>`;
       const mountNode = pane.querySelector("#executive-analytics-root");
       activeTabCleanup = initExecutiveAnalyticsDashboard(mountNode);
+    } else if (activeSubTab === "partner-syndication") {
+      pane.innerHTML = `<div id="partner-syndication-root"></div>`;
+      const mountNode = pane.querySelector("#partner-syndication-root");
+      activeTabCleanup = initPartnerSyndicationDashboard(mountNode);
     } else if (activeSubTab === "sheeko-voice") {
       pane.innerHTML = `<div id="sheeko-xariiro-root"></div>`;
       const mountNode = pane.querySelector("#sheeko-xariiro-root");

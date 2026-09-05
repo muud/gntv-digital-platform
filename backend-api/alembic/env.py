@@ -15,6 +15,7 @@ from app.modules.monetization import models as monetization_models  # noqa: F401
 from app.modules.streaming import models as streaming_models  # noqa: F401
 from app.modules.sheeko_xariiro import models as sheeko_xariiro_models  # noqa: F401
 from app.modules.cdn import models as cdn_models  # noqa: F401
+from app.modules.partners import models as partner_models  # noqa: F401
 
 target_metadata = Base.metadata
 

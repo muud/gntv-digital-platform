@@ -19,6 +19,10 @@ from app.modules.partners.models import (
     PartnerEmbedEventType,
     PartnerEntitlement,
     PartnerEntitlementStatus,
+    PartnerFinancialAuditLog,
+    PartnerRevenueShareAgreement,
+    PartnerSettlementStatement,
+    PartnerUsageMeter,
     PartnerStatus,
 )
 
@@ -149,3 +153,152 @@ class PartnerRepository:
             "completion_count": int(event_counts.get(PartnerEmbedEventType.PLAYBACK_COMPLETE, 0)),
             "error_count": int(event_counts.get(PartnerEmbedEventType.PLAYBACK_ERROR, 0)),
         }
+
+    def create_revenue_share_agreement(
+        self, agreement: PartnerRevenueShareAgreement, audit: PartnerFinancialAuditLog
+    ) -> PartnerRevenueShareAgreement:
+        self.db.add(agreement)
+        self.db.flush()
+        audit.partner_id = agreement.partner_id
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(agreement)
+        return agreement
+
+    def list_revenue_share_agreements(self, partner_id: UUID) -> list[PartnerRevenueShareAgreement]:
+        return (
+            self.db.query(PartnerRevenueShareAgreement)
+            .filter(PartnerRevenueShareAgreement.partner_id == partner_id)
+            .order_by(PartnerRevenueShareAgreement.starts_at.desc())
+            .all()
+        )
+
+    def get_active_revenue_share_agreement(
+        self, partner_id: UUID, currency: str, period_start: datetime, period_end: datetime
+    ) -> PartnerRevenueShareAgreement | None:
+        return (
+            self.db.query(PartnerRevenueShareAgreement)
+            .filter(
+                PartnerRevenueShareAgreement.partner_id == partner_id,
+                PartnerRevenueShareAgreement.currency == currency,
+                PartnerRevenueShareAgreement.is_active.is_(True),
+                PartnerRevenueShareAgreement.starts_at <= period_start,
+                (
+                    (PartnerRevenueShareAgreement.ends_at.is_(None))
+                    | (PartnerRevenueShareAgreement.ends_at >= period_end)
+                ),
+            )
+            .order_by(PartnerRevenueShareAgreement.starts_at.desc())
+            .first()
+        )
+
+    def get_usage_by_idempotency_key(self, partner_id: UUID, idempotency_key: str) -> PartnerUsageMeter | None:
+        return (
+            self.db.query(PartnerUsageMeter)
+            .filter(PartnerUsageMeter.partner_id == partner_id, PartnerUsageMeter.idempotency_key == idempotency_key)
+            .one_or_none()
+        )
+
+    def create_usage_meter(self, usage: PartnerUsageMeter, audit: PartnerFinancialAuditLog) -> PartnerUsageMeter:
+        existing = self.get_usage_by_idempotency_key(usage.partner_id, usage.idempotency_key)
+        if existing is not None:
+            return existing
+        self.db.add(usage)
+        self.db.flush()
+        audit.partner_id = usage.partner_id
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(usage)
+        return usage
+
+    def list_usage(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+    ) -> list[PartnerUsageMeter]:
+        query = self.db.query(PartnerUsageMeter).filter(PartnerUsageMeter.partner_id == partner_id)
+        if period_start is not None:
+            query = query.filter(PartnerUsageMeter.occurred_at >= period_start)
+        if period_end is not None:
+            query = query.filter(PartnerUsageMeter.occurred_at < period_end)
+        if currency is not None:
+            query = query.filter(PartnerUsageMeter.currency == currency)
+        return query.order_by(PartnerUsageMeter.occurred_at.asc()).all()
+
+    def get_settlement_by_idempotency_key(
+        self, partner_id: UUID, idempotency_key: str
+    ) -> PartnerSettlementStatement | None:
+        return (
+            self.db.query(PartnerSettlementStatement)
+            .filter(
+                PartnerSettlementStatement.partner_id == partner_id,
+                PartnerSettlementStatement.idempotency_key == idempotency_key,
+            )
+            .one_or_none()
+        )
+
+    def get_settlement_by_period(
+        self, partner_id: UUID, period_start: datetime, period_end: datetime, currency: str
+    ) -> PartnerSettlementStatement | None:
+        return (
+            self.db.query(PartnerSettlementStatement)
+            .filter(
+                PartnerSettlementStatement.partner_id == partner_id,
+                PartnerSettlementStatement.period_start == period_start,
+                PartnerSettlementStatement.period_end == period_end,
+                PartnerSettlementStatement.currency == currency,
+            )
+            .one_or_none()
+        )
+
+    def create_settlement(
+        self, statement: PartnerSettlementStatement, audit: PartnerFinancialAuditLog
+    ) -> PartnerSettlementStatement:
+        existing = self.get_settlement_by_idempotency_key(statement.partner_id, statement.idempotency_key)
+        if existing is not None:
+            return existing
+        self.db.add(statement)
+        self.db.flush()
+        audit.partner_id = statement.partner_id
+        audit.statement_id = statement.id
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(statement)
+        return statement
+
+    def list_settlements(self, partner_id: UUID) -> list[PartnerSettlementStatement]:
+        return (
+            self.db.query(PartnerSettlementStatement)
+            .filter(PartnerSettlementStatement.partner_id == partner_id)
+            .order_by(PartnerSettlementStatement.period_start.desc())
+            .all()
+        )
+
+    def get_settlement(self, partner_id: UUID, statement_id: UUID) -> PartnerSettlementStatement | None:
+        return (
+            self.db.query(PartnerSettlementStatement)
+            .filter(
+                PartnerSettlementStatement.partner_id == partner_id,
+                PartnerSettlementStatement.id == statement_id,
+            )
+            .one_or_none()
+        )
+
+    def update_settlement_status(
+        self, statement: PartnerSettlementStatement, audit: PartnerFinancialAuditLog
+    ) -> PartnerSettlementStatement:
+        self.db.add(statement)
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(statement)
+        return statement
+
+    def list_financial_audits(self, partner_id: UUID) -> list[PartnerFinancialAuditLog]:
+        return (
+            self.db.query(PartnerFinancialAuditLog)
+            .filter(PartnerFinancialAuditLog.partner_id == partner_id)
+            .order_by(PartnerFinancialAuditLog.created_at.desc())
+            .all()
+        )
