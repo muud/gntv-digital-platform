@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -28,6 +29,14 @@ from app.modules.partners.schemas import (
     PartnerEmbedEventResponse,
     PartnerEntitlementCreate,
     PartnerEntitlementResponse,
+    PartnerFinancialAuditLogResponse,
+    PartnerRevenueShareAgreementCreate,
+    PartnerRevenueShareAgreementResponse,
+    PartnerSettlementGenerateRequest,
+    PartnerSettlementStatementResponse,
+    PartnerSettlementStatusUpdate,
+    PartnerUsageMeterCreate,
+    PartnerUsageMeterResponse,
     PartnerResponse,
 )
 from app.modules.partners.service import PartnerSecurityError, PartnerSyndicationService
@@ -261,6 +270,149 @@ def issue_embed_token(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/billing/revenue-share-agreements",
+    response_model=PartnerRevenueShareAgreementResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create partner revenue-share agreement",
+)
+def create_revenue_share_agreement(
+    partner_id: UUID,
+    payload: PartnerRevenueShareAgreementCreate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerRevenueShareAgreementResponse:
+    try:
+        return service.create_revenue_share_agreement(partner_id, payload, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/billing/revenue-share-agreements",
+    response_model=list[PartnerRevenueShareAgreementResponse],
+    summary="List partner revenue-share agreements",
+)
+def list_revenue_share_agreements(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerRevenueShareAgreementResponse]:
+    try:
+        return service.list_revenue_share_agreements(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/billing/usage",
+    response_model=PartnerUsageMeterResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record persisted partner usage for billing",
+)
+def record_partner_usage(
+    partner_id: UUID,
+    payload: PartnerUsageMeterCreate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerUsageMeterResponse:
+    try:
+        return service.record_usage_meter(partner_id, payload, actor_user_id=user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/billing/usage",
+    response_model=list[PartnerUsageMeterResponse],
+    summary="List persisted partner usage metering rows",
+)
+def list_partner_usage(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+) -> list[PartnerUsageMeterResponse]:
+    try:
+        return service.list_usage_metering(partner_id, period_start, period_end, currency)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/billing/settlements",
+    response_model=PartnerSettlementStatementResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate an idempotent partner settlement statement",
+)
+def generate_partner_settlement(
+    partner_id: UUID,
+    payload: PartnerSettlementGenerateRequest,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerSettlementStatementResponse:
+    try:
+        return service.generate_settlement(partner_id, payload, actor_user_id=user.id)
+    except PartnerSecurityError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/billing/settlements",
+    response_model=list[PartnerSettlementStatementResponse],
+    summary="List partner settlement statements",
+)
+def list_partner_settlements(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerSettlementStatementResponse]:
+    try:
+        return service.list_settlements(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/billing/settlements/{statement_id}/status",
+    response_model=PartnerSettlementStatementResponse,
+    summary="Update partner settlement statement status",
+)
+def update_partner_settlement_status(
+    partner_id: UUID,
+    statement_id: UUID,
+    payload: PartnerSettlementStatusUpdate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerSettlementStatementResponse:
+    try:
+        return service.update_settlement_status(partner_id, statement_id, payload, actor_user_id=user.id)
+    except PartnerSecurityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/billing/audit",
+    response_model=list[PartnerFinancialAuditLogResponse],
+    summary="List partner financial audit log",
+)
+def list_partner_financial_audits(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerFinancialAuditLogResponse]:
+    try:
+        return service.list_financial_audit_logs(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 # --- Embed Authorization Endpoints ---

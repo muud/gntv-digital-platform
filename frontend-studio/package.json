@@ -6,6 +6,7 @@
   "scripts": {
     "studio": "vite --port 5174",
     "build": "vite build",
+    "lint": "node --check src/components/StudioDashboard.js && node --check src/components/ExecutiveAnalyticsDashboard.js && node --check src/components/PartnerSyndicationDashboard.js",
     "test": "node --test src/components/sheekoXariiroLanguages.test.js"
   },
   "dependencies": {

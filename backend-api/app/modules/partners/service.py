@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import hmac
 import json
@@ -23,6 +24,13 @@ from app.modules.partners.models import (
     PartnerEmbedEvent,
     PartnerEmbedEventType,
     PartnerEntitlement,
+    PartnerFinancialAuditAction,
+    PartnerFinancialAuditLog,
+    PartnerRevenueShareAgreement,
+    PartnerSettlementStatement,
+    PartnerUsageMeter,
+    RevenueShareRuleType,
+    SettlementStatus,
 )
 from app.modules.partners.repository import PartnerRepository
 from app.modules.partners.schemas import (
@@ -39,7 +47,16 @@ from app.modules.partners.schemas import (
     PartnerDomainCreate,
     PartnerEmbedEventCreate,
     PartnerEntitlementCreate,
+    PartnerFinancialAuditLogResponse,
+    PartnerRevenueShareAgreementCreate,
+    PartnerRevenueShareAgreementResponse,
+    PartnerSettlementGenerateRequest,
+    PartnerSettlementStatementResponse,
+    PartnerSettlementStatusUpdate,
+    PartnerUsageMeterCreate,
+    PartnerUsageMeterResponse,
     PartnerResponse,
+    RevenueShareTier,
 )
 
 
@@ -253,6 +270,187 @@ class PartnerSyndicationService:
     def analytics_overview(self) -> PartnerAnalyticsOverview:
         return PartnerAnalyticsOverview(**self.repo.analytics_overview())
 
+    def create_revenue_share_agreement(
+        self, partner_id: UUID, payload: PartnerRevenueShareAgreementCreate, actor_user_id: int | None
+    ) -> PartnerRevenueShareAgreementResponse:
+        self.get_partner(partner_id)
+        tiers_json = None
+        if payload.tiers is not None:
+            tiers_json = [
+                {
+                    "threshold_amount": self._money(tier.threshold_amount),
+                    "partner_percentage": self._rate(tier.partner_percentage),
+                }
+                for tier in payload.tiers
+            ]
+        agreement = PartnerRevenueShareAgreement(
+            partner_id=partner_id,
+            name=payload.name,
+            rule_type=payload.rule_type,
+            fixed_partner_percentage=payload.fixed_partner_percentage,
+            tiers_json=tiers_json,
+            currency=payload.currency.upper(),
+            starts_at=payload.starts_at,
+            ends_at=payload.ends_at,
+            created_by_user_id=actor_user_id,
+        )
+        audit = self._audit(
+            partner_id=partner_id,
+            action=PartnerFinancialAuditAction.AGREEMENT_CREATED,
+            actor_user_id=actor_user_id,
+            after={"name": payload.name, "rule_type": payload.rule_type.value, "currency": payload.currency.upper()},
+        )
+        return PartnerRevenueShareAgreementResponse.model_validate(
+            self.repo.create_revenue_share_agreement(agreement, audit)
+        )
+
+    def list_revenue_share_agreements(self, partner_id: UUID) -> list[PartnerRevenueShareAgreementResponse]:
+        self.get_partner(partner_id)
+        return [
+            PartnerRevenueShareAgreementResponse.model_validate(item)
+            for item in self.repo.list_revenue_share_agreements(partner_id)
+        ]
+
+    def record_usage_meter(
+        self, partner_id: UUID, payload: PartnerUsageMeterCreate, actor_user_id: int | None
+    ) -> PartnerUsageMeterResponse:
+        self.get_partner(partner_id)
+        usage = PartnerUsageMeter(
+            partner_id=partner_id,
+            content_type=payload.content_type,
+            content_id=payload.content_id,
+            usage_event_type=payload.usage_event_type,
+            quantity=payload.quantity,
+            gross_revenue_amount=self._decimal_money(payload.gross_revenue_amount),
+            currency=payload.currency.upper(),
+            source_event_id=payload.source_event_id,
+            idempotency_key=payload.idempotency_key,
+            occurred_at=payload.occurred_at,
+            metadata_json=payload.metadata_json,
+        )
+        audit = self._audit(
+            partner_id=partner_id,
+            action=PartnerFinancialAuditAction.USAGE_RECORDED,
+            actor_user_id=actor_user_id,
+            after={
+                "idempotency_key": payload.idempotency_key,
+                "gross_revenue_amount": self._money(payload.gross_revenue_amount),
+                "currency": payload.currency.upper(),
+            },
+        )
+        return PartnerUsageMeterResponse.model_validate(self.repo.create_usage_meter(usage, audit))
+
+    def list_usage_metering(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+    ) -> list[PartnerUsageMeterResponse]:
+        self.get_partner(partner_id)
+        if period_start and period_end and period_start >= period_end:
+            raise ValueError("period_start must be before period_end")
+        usage_rows = self.repo.list_usage(
+            partner_id, period_start, period_end, currency.upper() if currency else None
+        )
+        return [PartnerUsageMeterResponse.model_validate(item) for item in usage_rows]
+
+    def generate_settlement(
+        self, partner_id: UUID, payload: PartnerSettlementGenerateRequest, actor_user_id: int | None
+    ) -> PartnerSettlementStatementResponse:
+        self.get_partner(partner_id)
+        existing = self.repo.get_settlement_by_idempotency_key(partner_id, payload.idempotency_key)
+        if existing is not None:
+            return PartnerSettlementStatementResponse.model_validate(existing)
+        currency = payload.currency.upper()
+        existing_period = self.repo.get_settlement_by_period(
+            partner_id, payload.period_start, payload.period_end, currency
+        )
+        if existing_period is not None:
+            return PartnerSettlementStatementResponse.model_validate(existing_period)
+        agreement = self.repo.get_active_revenue_share_agreement(
+            partner_id, currency, payload.period_start, payload.period_end
+        )
+        if agreement is None:
+            raise PartnerSecurityError("No active revenue-share agreement covers this billing period")
+        usage_rows = self.repo.list_usage(partner_id, payload.period_start, payload.period_end, currency)
+        gross = sum((Decimal(str(row.gross_revenue_amount)) for row in usage_rows), Decimal("0"))
+        partner_share = self._calculate_partner_share(gross, agreement)
+        platform_share = self._decimal_money(gross - partner_share)
+        adjustment = self._decimal_money(payload.adjustment_amount)
+        net = self._decimal_money(partner_share + adjustment)
+        calculation_json: dict[str, Any] = {
+            "rule_type": agreement.rule_type.value,
+            "usage_event_ids": [str(row.id) for row in usage_rows],
+            "gross_revenue_amount": self._money(gross),
+            "partner_share_amount": self._money(partner_share),
+            "platform_share_amount": self._money(platform_share),
+            "adjustment_amount": self._money(adjustment),
+        }
+        statement = PartnerSettlementStatement(
+            partner_id=partner_id,
+            agreement_id=agreement.id,
+            period_start=payload.period_start,
+            period_end=payload.period_end,
+            currency=currency,
+            usage_count=sum(row.quantity for row in usage_rows),
+            gross_revenue_amount=self._decimal_money(gross),
+            platform_share_amount=platform_share,
+            partner_share_amount=self._decimal_money(partner_share),
+            adjustment_amount=adjustment,
+            net_settlement_amount=net,
+            status=SettlementStatus.DRAFT,
+            calculation_json=calculation_json,
+            idempotency_key=payload.idempotency_key,
+            generated_by_user_id=actor_user_id,
+        )
+        audit = self._audit(
+            partner_id=partner_id,
+            action=PartnerFinancialAuditAction.SETTLEMENT_GENERATED,
+            actor_user_id=actor_user_id,
+            after=calculation_json,
+        )
+        return PartnerSettlementStatementResponse.model_validate(self.repo.create_settlement(statement, audit))
+
+    def list_settlements(self, partner_id: UUID) -> list[PartnerSettlementStatementResponse]:
+        self.get_partner(partner_id)
+        return [PartnerSettlementStatementResponse.model_validate(item) for item in self.repo.list_settlements(partner_id)]
+
+    def update_settlement_status(
+        self,
+        partner_id: UUID,
+        statement_id: UUID,
+        payload: PartnerSettlementStatusUpdate,
+        actor_user_id: int | None,
+    ) -> PartnerSettlementStatementResponse:
+        statement = self.repo.get_settlement(partner_id, statement_id)
+        if statement is None:
+            raise ValueError("Settlement statement not found")
+        before = {"status": statement.status.value}
+        self._assert_status_transition(statement.status, payload.status)
+        statement.status = payload.status
+        now = utc_now()
+        if payload.status == SettlementStatus.FINALIZED:
+            statement.finalized_at = now
+        if payload.status == SettlementStatus.PAID:
+            statement.paid_at = now
+        audit = self._audit(
+            partner_id=partner_id,
+            action=PartnerFinancialAuditAction.SETTLEMENT_STATUS_CHANGED,
+            actor_user_id=actor_user_id,
+            statement_id=statement.id,
+            before=before,
+            after={"status": payload.status.value, "reason": payload.reason},
+        )
+        return PartnerSettlementStatementResponse.model_validate(self.repo.update_settlement_status(statement, audit))
+
+    def list_financial_audit_logs(self, partner_id: UUID) -> list[PartnerFinancialAuditLogResponse]:
+        self.get_partner(partner_id)
+        return [
+            PartnerFinancialAuditLogResponse.model_validate(item)
+            for item in self.repo.list_financial_audits(partner_id)
+        ]
+
     def verify_token(self, token: str) -> dict[str, Any]:
         parts = token.split(".")
         if len(parts) != 4 or ".".join(parts[:2]) != self.token_prefix:
@@ -331,3 +529,63 @@ class PartnerSyndicationService:
         if content_type == PartnerContentType.LIVE_CHANNEL:
             return f"/api/v1/streaming/live/{safe_content_id}/playlist.m3u8?embed_token={token}"
         return f"/api/v1/content/{safe_content_id}/playback?embed_token={token}"
+
+    def _calculate_partner_share(self, gross: Decimal, agreement: PartnerRevenueShareAgreement) -> Decimal:
+        if agreement.rule_type == RevenueShareRuleType.FIXED_PERCENTAGE:
+            percentage = Decimal(str(agreement.fixed_partner_percentage or Decimal("0")))
+            return self._decimal_money(gross * percentage)
+        tiers = self._tiers_from_json(agreement.tiers_json or [])
+        active_percentage = Decimal("0")
+        for tier in tiers:
+            if gross >= tier.threshold_amount:
+                active_percentage = tier.partner_percentage
+        return self._decimal_money(gross * active_percentage)
+
+    def _tiers_from_json(self, tiers_json: list[dict[str, str]]) -> list[RevenueShareTier]:
+        return [
+            RevenueShareTier(
+                threshold_amount=Decimal(tier["threshold_amount"]),
+                partner_percentage=Decimal(tier["partner_percentage"]),
+            )
+            for tier in tiers_json
+        ]
+
+    def _assert_status_transition(self, current: SettlementStatus, target: SettlementStatus) -> None:
+        allowed: dict[SettlementStatus, set[SettlementStatus]] = {
+            SettlementStatus.DRAFT: {SettlementStatus.FINALIZED, SettlementStatus.DISPUTED, SettlementStatus.VOID},
+            SettlementStatus.FINALIZED: {SettlementStatus.PAID, SettlementStatus.DISPUTED, SettlementStatus.VOID},
+            SettlementStatus.DISPUTED: {SettlementStatus.FINALIZED, SettlementStatus.VOID},
+            SettlementStatus.PAID: set(),
+            SettlementStatus.VOID: set(),
+        }
+        if target == current:
+            return
+        if target not in allowed[current]:
+            raise PartnerSecurityError(f"Invalid settlement status transition: {current.value} to {target.value}")
+
+    def _audit(
+        self,
+        partner_id: UUID,
+        action: PartnerFinancialAuditAction,
+        actor_user_id: int | None,
+        before: dict[str, Any] | None = None,
+        after: dict[str, Any] | None = None,
+        statement_id: UUID | None = None,
+    ) -> PartnerFinancialAuditLog:
+        return PartnerFinancialAuditLog(
+            partner_id=partner_id,
+            statement_id=statement_id,
+            action=action,
+            actor_user_id=actor_user_id,
+            before_json=before,
+            after_json=after,
+        )
+
+    def _decimal_money(self, value: Decimal) -> Decimal:
+        return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+    def _money(self, value: Decimal) -> str:
+        return str(self._decimal_money(value))
+
+    def _rate(self, value: Decimal) -> str:
+        return str(Decimal(str(value)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
