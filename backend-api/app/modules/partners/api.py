@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.modules.partners.models import PartnerCredentialStatus
+from app.modules.partners.models import PartnerCredentialStatus, PartnerPayoutStatus
 from app.modules.partners.repository import PartnerRepository
 from app.modules.partners.schemas import (
     EmbedAuthorizeRequest,
@@ -30,6 +30,15 @@ from app.modules.partners.schemas import (
     PartnerEntitlementCreate,
     PartnerEntitlementResponse,
     PartnerFinancialAuditLogResponse,
+    PartnerPayoutAccountCreate,
+    PartnerPayoutAccountResponse,
+    PartnerPayoutAccountUpdate,
+    PartnerPayoutAuditLogResponse,
+    PartnerPayoutCreate,
+    PartnerPayoutExecuteRequest,
+    PartnerPayoutResponse,
+    PartnerReconciliationCreate,
+    PartnerReconciliationResponse,
     PartnerRevenueShareAgreementCreate,
     PartnerRevenueShareAgreementResponse,
     PartnerSettlementGenerateRequest,
@@ -413,6 +422,225 @@ def list_partner_financial_audits(
         return service.list_financial_audit_logs(partner_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+# --- Partner Payout Orchestration & Reconciliation Endpoints ---
+
+
+@partners_router.post(
+    "/{partner_id}/payout-accounts",
+    response_model=PartnerPayoutAccountResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create or register a partner payout destination account",
+)
+def create_partner_payout_account(
+    partner_id: UUID,
+    payload: PartnerPayoutAccountCreate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPayoutAccountResponse:
+    try:
+        return service.create_payout_account(partner_id, payload, actor_user_id=user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/payout-accounts",
+    response_model=list[PartnerPayoutAccountResponse],
+    summary="List configured payout destination accounts for partner",
+)
+def list_partner_payout_accounts(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerPayoutAccountResponse]:
+    try:
+        return service.list_payout_accounts(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.patch(
+    "/{partner_id}/payout-accounts/{account_id}",
+    response_model=PartnerPayoutAccountResponse,
+    summary="Update or toggle a partner payout destination account",
+)
+def update_partner_payout_account(
+    partner_id: UUID,
+    account_id: UUID,
+    payload: PartnerPayoutAccountUpdate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPayoutAccountResponse:
+    try:
+        return service.update_payout_account(partner_id, account_id, payload, actor_user_id=user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/payouts",
+    response_model=PartnerPayoutResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create payout instruction from finalized settlement statement",
+)
+def create_partner_payout(
+    partner_id: UUID,
+    payload: PartnerPayoutCreate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPayoutResponse:
+    try:
+        return service.create_payout(partner_id, payload, actor_user_id=user.id)
+    except PartnerSecurityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/payouts",
+    response_model=list[PartnerPayoutResponse],
+    summary="List payout instructions for partner",
+)
+def list_partner_payouts(
+    partner_id: UUID,
+    payout_status: PartnerPayoutStatus | None = Query(None, alias="status", description="Filter by payout status"),
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerPayoutResponse]:
+    try:
+        return service.list_payouts(partner_id, status=payout_status)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/payouts/{payout_id}",
+    response_model=PartnerPayoutResponse,
+    summary="Get payout instruction by ID",
+)
+def get_partner_payout(
+    partner_id: UUID,
+    payout_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPayoutResponse:
+    try:
+        return service.get_payout(partner_id, payout_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/payouts/{payout_id}/approve",
+    response_model=PartnerPayoutResponse,
+    summary="Approve a pending payout instruction (Step 1 of 2-step execution)",
+)
+def approve_partner_payout(
+    partner_id: UUID,
+    payout_id: UUID,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPayoutResponse:
+    try:
+        return service.approve_payout(partner_id, payout_id, actor_user_id=user.id)
+    except PartnerSecurityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/payouts/{payout_id}/execute",
+    response_model=PartnerPayoutResponse,
+    summary="Execute approved payout via payment provider (Step 2 of 2-step execution)",
+)
+def execute_partner_payout(
+    partner_id: UUID,
+    payout_id: UUID,
+    payload: PartnerPayoutExecuteRequest,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPayoutResponse:
+    try:
+        return service.execute_payout(partner_id, payout_id, payload, actor_user_id=user.id)
+    except PartnerSecurityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/payouts/{payout_id}/cancel",
+    response_model=PartnerPayoutResponse,
+    summary="Cancel a pending or approved payout instruction",
+)
+def cancel_partner_payout(
+    partner_id: UUID,
+    payout_id: UUID,
+    reason: str | None = Query(None, description="Reason for cancellation"),
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPayoutResponse:
+    try:
+        return service.cancel_payout(partner_id, payout_id, reason=reason, actor_user_id=user.id)
+    except PartnerSecurityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/reconciliation",
+    response_model=PartnerReconciliationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Process external provider transaction reconciliation record",
+)
+def reconcile_partner_payout(
+    partner_id: UUID,
+    payload: PartnerReconciliationCreate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerReconciliationResponse:
+    try:
+        return service.reconcile_payout(partner_id, payload, actor_user_id=user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/reconciliation",
+    response_model=list[PartnerReconciliationResponse],
+    summary="List payout reconciliation records for partner",
+)
+def list_partner_reconciliations(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerReconciliationResponse]:
+    try:
+        return service.list_reconciliations(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/payouts-audit",
+    response_model=list[PartnerPayoutAuditLogResponse],
+    summary="List partner payout audit log",
+)
+def list_partner_payout_audits(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerPayoutAuditLogResponse]:
+    try:
+        return service.list_payout_audit_logs(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
 
 
 # --- Embed Authorization Endpoints ---

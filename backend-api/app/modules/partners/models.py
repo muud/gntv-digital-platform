@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, JSON, Numeric, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -84,6 +84,54 @@ class PartnerFinancialAuditAction(StrEnum):
     SETTLEMENT_STATUS_CHANGED = "settlement_status_changed"
 
 
+class PartnerPayoutAccountStatus(StrEnum):
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+
+
+class PartnerPayoutVerificationStatus(StrEnum):
+    UNVERIFIED = "unverified"
+    PENDING = "pending"
+    VERIFIED = "verified"
+    FAILED = "failed"
+
+
+class PartnerPayoutProviderType(StrEnum):
+    MOCK = "mock"
+    EXTERNAL_REFERENCE = "external_reference"
+
+
+class PartnerPayoutStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    PROCESSING = "processing"
+    PAID = "paid"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    REVERSED = "reversed"
+
+
+class PartnerPayoutReconciliationOutcome(StrEnum):
+    MATCHED = "matched"
+    DUPLICATE_PROVIDER_TRANSACTION = "duplicate_provider_transaction"
+    AMOUNT_MISMATCH = "amount_mismatch"
+    CURRENCY_MISMATCH = "currency_mismatch"
+    UNKNOWN_TRANSACTION = "unknown_transaction"
+    FAILED_OR_RETURNED = "failed_or_returned"
+
+
+class PartnerPayoutAuditAction(StrEnum):
+    PAYOUT_ACCOUNT_CREATED = "payout_account_created"
+    PAYOUT_ACCOUNT_UPDATED = "payout_account_updated"
+    PAYOUT_CREATED = "payout_created"
+    PAYOUT_APPROVED = "payout_approved"
+    PAYOUT_EXECUTED = "payout_executed"
+    PAYOUT_FAILED = "payout_failed"
+    PAYOUT_CANCELLED = "payout_cancelled"
+    PAYOUT_REVERSED = "payout_reversed"
+    PAYOUT_RECONCILED = "payout_reconciled"
+
+
 class Partner(Base):
     """B2B partner organization allowed to syndicate GNTV content."""
 
@@ -127,6 +175,12 @@ class Partner(Base):
     )
     settlement_statements: Mapped[list[PartnerSettlementStatement]] = relationship(
         "PartnerSettlementStatement", back_populates="partner", cascade="all, delete-orphan"
+    )
+    payout_accounts: Mapped[list[PartnerPayoutAccount]] = relationship(
+        "PartnerPayoutAccount", back_populates="partner", cascade="all, delete-orphan"
+    )
+    payouts: Mapped[list[PartnerPayout]] = relationship(
+        "PartnerPayout", back_populates="partner", cascade="all, delete-orphan"
     )
 
     __table_args__ = (Index("ix_partners_status_created", "status", "created_at"),)
@@ -385,3 +439,157 @@ class PartnerFinancialAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     __table_args__ = (Index("ix_partner_financial_audit_partner_created", "partner_id", "created_at"),)
+
+
+class PartnerPayoutAccount(Base):
+    """Provider-neutral payout destination with sealed non-sensitive metadata."""
+
+    __tablename__ = "partner_payout_accounts"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    provider_type: Mapped[PartnerPayoutProviderType] = mapped_column(
+        enum_type(PartnerPayoutProviderType, "partner_payout_provider_type_enum"),
+        nullable=False,
+    )
+    destination_label: Mapped[str] = mapped_column(String(160), nullable=False)
+    destination_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_provider_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[PartnerPayoutAccountStatus] = mapped_column(
+        enum_type(PartnerPayoutAccountStatus, "partner_payout_account_status_enum"),
+        nullable=False,
+        default=PartnerPayoutAccountStatus.ENABLED,
+    )
+    verification_status: Mapped[PartnerPayoutVerificationStatus] = mapped_column(
+        enum_type(PartnerPayoutVerificationStatus, "partner_payout_verification_status_enum"),
+        nullable=False,
+        default=PartnerPayoutVerificationStatus.UNVERIFIED,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="payout_accounts")
+    payouts: Mapped[list[PartnerPayout]] = relationship("PartnerPayout", back_populates="payout_account")
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "idempotency_key", name="uq_partner_payout_account_idempotency"),
+        Index("ix_partner_payout_accounts_partner_status", "partner_id", "status", "verification_status"),
+    )
+
+
+class PartnerPayout(Base):
+    """Controlled payout instruction derived from a finalized settlement statement."""
+
+    __tablename__ = "partner_payouts"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    settlement_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("partner_settlement_statements.id", ondelete="RESTRICT"), nullable=False
+    )
+    payout_account_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("partner_payout_accounts.id", ondelete="RESTRICT"), nullable=False
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[PartnerPayoutStatus] = mapped_column(
+        enum_type(PartnerPayoutStatus, "partner_payout_status_enum"),
+        nullable=False,
+        default=PartnerPayoutStatus.PENDING,
+    )
+    provider_type: Mapped[PartnerPayoutProviderType] = mapped_column(
+        enum_type(PartnerPayoutProviderType, "partner_payout_provider_type_enum"),
+        nullable=False,
+    )
+    provider_payout_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_transaction_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    provider_execution_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="payouts")
+    settlement: Mapped[PartnerSettlementStatement] = relationship("PartnerSettlementStatement")
+    payout_account: Mapped[PartnerPayoutAccount] = relationship("PartnerPayoutAccount", back_populates="payouts")
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "idempotency_key", name="uq_partner_payout_idempotency"),
+        UniqueConstraint("settlement_id", name="uq_partner_payout_settlement"),
+        UniqueConstraint("provider_type", "provider_transaction_id", name="uq_partner_payout_provider_transaction"),
+        Index("ix_partner_payouts_partner_status", "partner_id", "status", "created_at"),
+    )
+
+
+class PartnerPayoutReconciliation(Base):
+    """Deterministic reconciliation result for provider payout transactions."""
+
+    __tablename__ = "partner_payout_reconciliations"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    payout_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("partner_payouts.id", ondelete="SET NULL"), nullable=True
+    )
+    provider_type: Mapped[PartnerPayoutProviderType] = mapped_column(
+        enum_type(PartnerPayoutProviderType, "partner_payout_provider_type_enum"),
+        nullable=False,
+    )
+    provider_transaction_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    reported_amount: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    reported_currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    provider_status: Mapped[str] = mapped_column(String(80), nullable=False)
+    outcome: Mapped[PartnerPayoutReconciliationOutcome] = mapped_column(
+        enum_type(PartnerPayoutReconciliationOutcome, "partner_payout_reconciliation_outcome_enum"),
+        nullable=False,
+    )
+    details_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    reconciled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    payout: Mapped[PartnerPayout | None] = relationship("PartnerPayout")
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "idempotency_key", name="uq_partner_reconciliation_idempotency"),
+        Index("ix_partner_reconciliation_provider_txn", "provider_type", "provider_transaction_id"),
+        Index("ix_partner_reconciliation_partner_created", "partner_id", "created_at"),
+    )
+
+
+class PartnerPayoutAuditLog(Base):
+    """Append-only payout audit trail with provider reference context."""
+
+    __tablename__ = "partner_payout_audit_logs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    payout_account_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("partner_payout_accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    payout_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("partner_payouts.id", ondelete="SET NULL"), nullable=True)
+    reconciliation_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("partner_payout_reconciliations.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[PartnerPayoutAuditAction] = mapped_column(
+        enum_type(PartnerPayoutAuditAction, "partner_payout_audit_action_enum"),
+        nullable=False,
+    )
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    provider_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    before_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    after_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    __table_args__ = (Index("ix_partner_payout_audit_partner_created", "partner_id", "created_at"),)
