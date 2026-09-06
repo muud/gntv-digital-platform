@@ -1,5 +1,5 @@
 /**
- * Partner Syndication, Embed SDK & Partner Billing / Settlement Console (Sprint 7.6 + 7.7).
+ * Partner Syndication, Embed SDK, Partner Billing & Payout Orchestration (Sprint 7.6, 7.7, 7.8).
  * Vanilla JS component for GNTV Studio dashboard architecture.
  */
 
@@ -7,7 +7,7 @@ export function initPartnerSyndicationDashboard(container) {
   let active = true;
   let isRefreshing = false;
   let fetchError = "";
-  let activeSubSection = "billing"; // "billing" | "syndication"
+  let activeSubSection = "billing"; // "billing" | "payouts" | "syndication"
   let partners = [];
   let analytics = null;
   let selectedPartnerId = "";
@@ -18,6 +18,10 @@ export function initPartnerSyndicationDashboard(container) {
   let settlements = [];
   let usageRows = [];
   let auditLogs = [];
+  let payoutAccounts = [];
+  let payouts = [];
+  let reconciliations = [];
+  let payoutAudits = [];
 
   const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -71,17 +75,25 @@ export function initPartnerSyndicationDashboard(container) {
       settlements = [];
       usageRows = [];
       auditLogs = [];
+      payoutAccounts = [];
+      payouts = [];
+      reconciliations = [];
+      payoutAudits = [];
       return;
     }
     try {
-      const [domainList, entitlementList, agreementList, settlementList, usageList, auditList] =
+      const [domainList, entitlementList, agreementList, settlementList, usageList, auditList, accountList, payoutList, reconList, pAuditList] =
         await Promise.all([
           api(`/api/v1/partners/${selectedPartnerId}/domains`).catch(() => []),
           api(`/api/v1/partners/${selectedPartnerId}/entitlements`).catch(() => []),
           api(`/api/v1/partners/${selectedPartnerId}/billing/revenue-share-agreements`).catch(() => []),
           api(`/api/v1/partners/${selectedPartnerId}/billing/settlements`).catch(() => []),
           api(`/api/v1/partners/${selectedPartnerId}/billing/usage`).catch(() => []),
-          api(`/api/v1/partners/${selectedPartnerId}/billing/audit`).catch(() => [])
+          api(`/api/v1/partners/${selectedPartnerId}/billing/audit`).catch(() => []),
+          api(`/api/v1/partners/${selectedPartnerId}/payout-accounts`).catch(() => []),
+          api(`/api/v1/partners/${selectedPartnerId}/payouts`).catch(() => []),
+          api(`/api/v1/partners/${selectedPartnerId}/reconciliation`).catch(() => []),
+          api(`/api/v1/partners/${selectedPartnerId}/payouts-audit`).catch(() => [])
         ]);
       domains = domainList;
       entitlements = entitlementList;
@@ -89,6 +101,10 @@ export function initPartnerSyndicationDashboard(container) {
       settlements = settlementList;
       usageRows = usageList;
       auditLogs = auditList;
+      payoutAccounts = accountList;
+      payouts = payoutList;
+      reconciliations = reconList;
+      payoutAudits = pAuditList;
     } catch (error) {
       fetchError = error.message || "Failed to load partner details";
     }
@@ -121,6 +137,10 @@ export function initPartnerSyndicationDashboard(container) {
       0
     );
 
+    const totalDisbursed = payouts
+      .filter((p) => p.status === "paid")
+      .reduce((acc, p) => acc + Number(p.amount || 0), 0);
+
     container.innerHTML = `
       <style>
         .partner-shell { padding: 24px; color: #e5e7eb; background: #090a0f; min-height: 100%; box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
@@ -132,6 +152,8 @@ export function initPartnerSyndicationDashboard(container) {
         .partner-btn.secondary { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
         .partner-btn.secondary:hover { background: rgba(255,255,255,.1); }
         .partner-btn.sm { padding: 6px 10px; font-size: 12px; border-radius: 6px; }
+        .partner-btn.danger { background: rgba(239,68,68,.25); border: 1px solid rgba(239,68,68,.4); color: #fca5a5; }
+        .partner-btn.danger:hover { background: rgba(239,68,68,.4); }
         .partner-nav { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 8px; }
         .partner-nav-btn { background: transparent; border: 0; color: #9ca3af; padding: 8px 14px; border-radius: 8px; font-weight: 700; cursor: pointer; }
         .partner-nav-btn.active { color: #fff; background: rgba(255,255,255,.08); }
@@ -149,6 +171,7 @@ export function initPartnerSyndicationDashboard(container) {
         .partner-pill.success { background: rgba(16,185,129,.15); color: #6ee7b7; border-color: rgba(16,185,129,.3); }
         .partner-pill.warning { background: rgba(245,158,11,.15); color: #fcd34d; border-color: rgba(245,158,11,.3); }
         .partner-pill.danger { background: rgba(239,68,68,.15); color: #fca5a5; border-color: rgba(239,68,68,.3); }
+        .partner-pill.info { background: rgba(59,130,246,.15); color: #93c5fd; border-color: rgba(59,130,246,.3); }
         .partner-form { display: grid; gap: 10px; margin-top: 14px; }
         .partner-form input, .partner-form select, .partner-form textarea { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: #fff; padding: 10px 12px; outline: none; }
         .partner-form label { display: grid; gap: 6px; color: #9ca3af; font-size: 11px; font-weight: 800; text-transform: uppercase; }
@@ -164,7 +187,7 @@ export function initPartnerSyndicationDashboard(container) {
         <div class="partner-header">
           <div>
             <h2>Partner Syndication & Revenue Settlement</h2>
-            <p>B2B syndication, server-side access controls, tiered revenue-share agreements, and deterministic financial settlements.</p>
+            <p>B2B syndication, server-side access controls, tiered revenue-share agreements, deterministic settlements, and payout orchestration.</p>
           </div>
           <button class="partner-btn secondary" id="partner-refresh">${isRefreshing ? "Refreshing..." : "Refresh"}</button>
         </div>
@@ -173,7 +196,7 @@ export function initPartnerSyndicationDashboard(container) {
           <div class="partner-card"><div class="partner-kpi-label">Partners</div><div class="partner-kpi-value">${formatNumber(analytics?.partner_count)}</div></div>
           <div class="partner-card"><div class="partner-kpi-label">Active Partners</div><div class="partner-kpi-value">${formatNumber(analytics?.active_partner_count)}</div></div>
           <div class="partner-card"><div class="partner-kpi-label">Persisted Gross Revenue</div><div class="partner-kpi-value">${formatMoney(totalGross)}</div></div>
-          <div class="partner-card"><div class="partner-kpi-label">Settled Net Payouts</div><div class="partner-kpi-value">${formatMoney(totalSettled)}</div></div>
+          <div class="partner-card"><div class="partner-kpi-label">Disbursed Payouts</div><div class="partner-kpi-value">${formatMoney(totalDisbursed)}</div></div>
         </div>
         <div class="partner-layout">
           <div class="partner-card">
@@ -206,6 +229,7 @@ export function initPartnerSyndicationDashboard(container) {
                   </div>
                   <div class="partner-nav">
                     <button class="partner-nav-btn ${activeSubSection === 'billing' ? 'active' : ''}" id="tab-billing">Billing & Settlement</button>
+                    <button class="partner-nav-btn ${activeSubSection === 'payouts' ? 'active' : ''}" id="tab-payouts">Payouts & Reconciliation</button>
                     <button class="partner-nav-btn ${activeSubSection === 'syndication' ? 'active' : ''}" id="tab-syndication">Syndication & Embeds</button>
                   </div>
                 </div>
@@ -327,6 +351,147 @@ export function initPartnerSyndicationDashboard(container) {
                     </table>
                   ` : `<div class="partner-empty">No financial audit records recorded yet.</div>`}
                 </div>
+              ` : activeSubSection === 'payouts' ? `
+                <!-- Payouts & Reconciliation Section (Sprint 7.8) -->
+                <div class="partner-card">
+                  <h3 class="partner-section-title">Registered Payout Accounts</h3>
+                  ${payoutAccounts.length ? `
+                    <table class="partner-table">
+                      <thead><tr><th>Label</th><th>Destination Ref</th><th>Provider</th><th>Currency</th><th>Status</th><th>Verification</th></tr></thead>
+                      <tbody>
+                        ${payoutAccounts.map((acc) => `
+                          <tr>
+                            <td><strong>${acc.destination_label}</strong></td>
+                            <td><code>${acc.destination_reference}</code></td>
+                            <td><span class="partner-pill">${acc.provider_type}</span></td>
+                            <td>${acc.currency}</td>
+                            <td><span class="partner-pill ${acc.status === 'enabled' ? 'success' : 'warning'}">${acc.status}</span></td>
+                            <td><span class="partner-pill ${acc.verification_status === 'verified' ? 'success' : acc.verification_status === 'pending' ? 'warning' : ''}">${acc.verification_status}</span></td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  ` : `<div class="partner-empty">No payout destination accounts configured yet.</div>`}
+
+                  <form class="partner-form" id="payout-account-form" style="margin-top:16px">
+                    <h4 style="margin:0;color:#fff;font-size:13px">Register Payout Account</h4>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+                      <label>Account Label <input name="destination_label" required placeholder="Corporate Wire Account"></label>
+                      <label>Masked Reference <input name="destination_reference" required placeholder="bank_wire:****4321"></label>
+                      <label>Provider <select name="provider_type"><option value="mock">mock</option><option value="external_reference">external_reference</option></select></label>
+                      <label>Currency <input name="currency" value="USD" maxlength="3" required></label>
+                      <label>Idempotency Key <input name="idempotency_key" required placeholder="acct-key-${Date.now()}"></label>
+                    </div>
+                    <button class="partner-btn" type="submit">Save Destination Account</button>
+                  </form>
+                </div>
+
+                <div class="partner-card">
+                  <h3 class="partner-section-title">Payout Instructions Queue</h3>
+                  ${payouts.length ? `
+                    <table class="partner-table">
+                      <thead><tr><th>Payout ID</th><th>Amount</th><th>Status</th><th>Provider Ref</th><th>Created</th><th>Actions</th></tr></thead>
+                      <tbody>
+                        ${payouts.map((p) => `
+                          <tr>
+                            <td><code style="font-size:11px">${p.id.slice(0, 8)}...</code></td>
+                            <td><strong>${formatMoney(p.amount, p.currency)}</strong></td>
+                            <td><span class="partner-pill ${p.status === 'paid' ? 'success' : p.status === 'approved' ? 'info' : p.status === 'failed' ? 'danger' : 'warning'}">${p.status}</span></td>
+                            <td>${p.provider_transaction_id || p.provider_payout_id || '—'}</td>
+                            <td>${new Date(p.created_at).toLocaleDateString()}</td>
+                            <td>
+                              ${p.status === 'pending' ? `
+                                <button class="partner-btn sm btn-payout-approve" data-id="${p.id}">Approve</button>
+                                <button class="partner-btn danger sm btn-payout-cancel" data-id="${p.id}">Cancel</button>
+                              ` : ''}
+                              ${p.status === 'approved' ? `
+                                <button class="partner-btn sm btn-payout-execute" data-id="${p.id}">Execute</button>
+                                <button class="partner-btn danger sm btn-payout-cancel" data-id="${p.id}">Cancel</button>
+                              ` : ''}
+                              ${p.status === 'failed' ? `<span style="font-size:11px;color:#fca5a5">${p.failure_code || 'Error'}</span>` : ''}
+                            </td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  ` : `<div class="partner-empty">No payout instructions queued yet.</div>`}
+
+                  <form class="partner-form" id="payout-create-form" style="margin-top:16px">
+                    <h4 style="margin:0;color:#fff;font-size:13px">Create Payout from Finalized Settlement</h4>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+                      <label>Finalized Statement
+                        <select name="settlement_id" required>
+                          <option value="">Select statement...</option>
+                          ${settlements.filter((s) => s.status === 'finalized').map((s) => `
+                            <option value="${s.id}">${new Date(s.period_start).toLocaleDateString()} - ${new Date(s.period_end).toLocaleDateString()} (${formatMoney(s.net_settlement_amount, s.currency)})</option>
+                          `).join('')}
+                        </select>
+                      </label>
+                      <label>Payout Destination Account
+                        <select name="payout_account_id" required>
+                          <option value="">Select account...</option>
+                          ${payoutAccounts.filter((a) => a.status === 'enabled').map((a) => `
+                            <option value="${a.id}">${a.destination_label} (${a.destination_reference})</option>
+                          `).join('')}
+                        </select>
+                      </label>
+                      <label>Idempotency Key <input name="idempotency_key" required placeholder="payout-instr-${Date.now()}"></label>
+                    </div>
+                    <button class="partner-btn" type="submit">Queue Payout Instruction</button>
+                  </form>
+                </div>
+
+                <div class="partner-card">
+                  <h3 class="partner-section-title">Reconciliation Feed</h3>
+                  ${reconciliations.length ? `
+                    <table class="partner-table">
+                      <thead><tr><th>Tx ID</th><th>Reported Amount</th><th>Provider Status</th><th>Outcome</th><th>Details</th></tr></thead>
+                      <tbody>
+                        ${reconciliations.map((r) => `
+                          <tr>
+                            <td><code>${r.provider_transaction_id}</code></td>
+                            <td>${formatMoney(r.reported_amount, r.reported_currency)}</td>
+                            <td>${r.provider_status}</td>
+                            <td><span class="partner-pill ${r.outcome === 'matched' ? 'success' : r.outcome === 'duplicate_provider_transaction' ? 'warning' : 'danger'}">${r.outcome}</span></td>
+                            <td><code style="font-size:11px;color:#bae6fd">${JSON.stringify(r.details_json || {})}</code></td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  ` : `<div class="partner-empty">No reconciliation records processed yet.</div>`}
+
+                  <form class="partner-form" id="reconciliation-form" style="margin-top:16px">
+                    <h4 style="margin:0;color:#fff;font-size:13px">Ingest External Reconciliation Record</h4>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+                      <label>Provider Tx ID <input name="provider_transaction_id" required placeholder="tx_mock_12345"></label>
+                      <label>Reported Amount <input name="reported_amount" type="number" step="0.01" required value="100.00"></label>
+                      <label>Currency <input name="reported_currency" maxlength="3" required value="USD"></label>
+                      <label>Provider Status <input name="provider_status" required value="success"></label>
+                      <label>Idempotency Key <input name="idempotency_key" required placeholder="recon-key-${Date.now()}"></label>
+                    </div>
+                    <button class="partner-btn secondary" type="submit">Reconcile External Transaction</button>
+                  </form>
+                </div>
+
+                <div class="partner-card">
+                  <h3 class="partner-section-title">Payout Audit Trail</h3>
+                  ${payoutAudits.length ? `
+                    <table class="partner-table">
+                      <thead><tr><th>Action</th><th>Actor</th><th>Date</th><th>Provider Ref</th><th>Snapshot</th></tr></thead>
+                      <tbody>
+                        ${payoutAudits.map((log) => `
+                          <tr>
+                            <td><span class="partner-pill">${log.action}</span></td>
+                            <td>User #${log.actor_user_id || 'System'}</td>
+                            <td>${new Date(log.created_at).toLocaleString()}</td>
+                            <td>${log.provider_reference || '—'}</td>
+                            <td><code style="font-size:11px;color:#bae6fd">${JSON.stringify(log.after_json || log.before_json || {})}</code></td>
+                          </tr>
+                        `).join('')}
+                      </tbody>
+                    </table>
+                  ` : `<div class="partner-empty">No payout audit events recorded yet.</div>`}
+                </div>
               ` : `
                 <!-- Syndication & Embeds Section -->
                 <div class="partner-grid">
@@ -348,6 +513,7 @@ export function initPartnerSyndicationDashboard(container) {
                     </form>
                   </div>
                 </div>
+
                 <div class="partner-card">
                   <form class="partner-form" id="partner-token-form">
                     <h3 class="partner-section-title">Generate Test Embed Token</h3>
@@ -375,6 +541,10 @@ export function initPartnerSyndicationDashboard(container) {
     container.querySelector("#partner-refresh")?.addEventListener("click", refresh);
     container.querySelector("#tab-billing")?.addEventListener("click", () => {
       activeSubSection = "billing";
+      render();
+    });
+    container.querySelector("#tab-payouts")?.addEventListener("click", () => {
+      activeSubSection = "payouts";
       render();
     });
     container.querySelector("#tab-syndication")?.addEventListener("click", () => {
@@ -524,6 +694,128 @@ export function initPartnerSyndicationDashboard(container) {
           render();
         }
       });
+    });
+
+    // Payout Account Create
+    container.querySelector("#payout-account-form")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.target));
+      try {
+        await api(`/api/v1/partners/${selectedPartnerId}/payout-accounts`, {
+          method: "POST",
+          body: JSON.stringify({
+            destination_label: data.destination_label,
+            destination_reference: data.destination_reference,
+            provider_type: data.provider_type || "mock",
+            currency: data.currency || "USD",
+            idempotency_key: data.idempotency_key
+          })
+        });
+        await refreshPartnerDetails();
+        render();
+      } catch (error) {
+        fetchError = error.message;
+        render();
+      }
+    });
+
+    // Payout Create
+    container.querySelector("#payout-create-form")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.target));
+      try {
+        await api(`/api/v1/partners/${selectedPartnerId}/payouts`, {
+          method: "POST",
+          body: JSON.stringify({
+            settlement_id: data.settlement_id,
+            payout_account_id: data.payout_account_id,
+            idempotency_key: data.idempotency_key
+          })
+        });
+        await refreshPartnerDetails();
+        render();
+      } catch (error) {
+        fetchError = error.message;
+        render();
+      }
+    });
+
+    // Payout Approve
+    container.querySelectorAll(".btn-payout-approve").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const payoutId = btn.dataset.id;
+        try {
+          await api(`/api/v1/partners/${selectedPartnerId}/payouts/${payoutId}/approve`, {
+            method: "POST"
+          });
+          await refreshPartnerDetails();
+          render();
+        } catch (error) {
+          fetchError = error.message;
+          render();
+        }
+      });
+    });
+
+    // Payout Execute
+    container.querySelectorAll(".btn-payout-execute").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const payoutId = btn.dataset.id;
+        const execKey = `exec-${Date.now()}`;
+        try {
+          await api(`/api/v1/partners/${selectedPartnerId}/payouts/${payoutId}/execute`, {
+            method: "POST",
+            body: JSON.stringify({ idempotency_key: execKey })
+          });
+          await refreshPartnerDetails();
+          render();
+        } catch (error) {
+          fetchError = error.message;
+          render();
+        }
+      });
+    });
+
+    // Payout Cancel
+    container.querySelectorAll(".btn-payout-cancel").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const payoutId = btn.dataset.id;
+        const reason = window.prompt("Reason for cancellation:") || "Operator cancellation";
+        try {
+          await api(`/api/v1/partners/${selectedPartnerId}/payouts/${payoutId}/cancel?reason=${encodeURIComponent(reason)}`, {
+            method: "POST"
+          });
+          await refreshPartnerDetails();
+          render();
+        } catch (error) {
+          fetchError = error.message;
+          render();
+        }
+      });
+    });
+
+    // Reconciliation Ingest
+    container.querySelector("#reconciliation-form")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.target));
+      try {
+        await api(`/api/v1/partners/${selectedPartnerId}/reconciliation`, {
+          method: "POST",
+          body: JSON.stringify({
+            provider_type: "mock",
+            provider_transaction_id: data.provider_transaction_id,
+            reported_amount: data.reported_amount,
+            reported_currency: data.reported_currency,
+            provider_status: data.provider_status,
+            idempotency_key: data.idempotency_key
+          })
+        });
+        await refreshPartnerDetails();
+        render();
+      } catch (error) {
+        fetchError = error.message;
+        render();
+      }
     });
 
     container.querySelector("#partner-domain-form")?.addEventListener("submit", async (event) => {

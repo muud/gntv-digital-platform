@@ -13,6 +13,12 @@ from app.modules.partners.models import (
     PartnerEmbedEventType,
     PartnerEntitlementStatus,
     PartnerFinancialAuditAction,
+    PartnerPayoutAccountStatus,
+    PartnerPayoutAuditAction,
+    PartnerPayoutProviderType,
+    PartnerPayoutReconciliationOutcome,
+    PartnerPayoutStatus,
+    PartnerPayoutVerificationStatus,
     PartnerStatus,
     PartnerUsageEventType,
     RevenueShareRuleType,
@@ -332,6 +338,137 @@ class PartnerFinancialAuditLogResponse(BaseModel):
     statement_id: UUID | None
     action: PartnerFinancialAuditAction
     actor_user_id: int | None
+    before_json: dict[str, object] | None
+    after_json: dict[str, object] | None
+    created_at: datetime
+
+
+class PartnerPayoutAccountCreate(BaseModel):
+    provider_type: PartnerPayoutProviderType = PartnerPayoutProviderType.MOCK
+    destination_label: str = Field(..., min_length=2, max_length=160)
+    destination_reference: str = Field(..., min_length=4, max_length=255)
+    provider_metadata: dict[str, object] | None = None
+    currency: str = Field("USD", min_length=3, max_length=3)
+    verification_status: PartnerPayoutVerificationStatus = PartnerPayoutVerificationStatus.UNVERIFIED
+    idempotency_key: str = Field(..., min_length=8, max_length=160)
+
+    @field_validator("provider_metadata")
+    @classmethod
+    def reject_sensitive_metadata(cls, value: dict[str, object] | None) -> dict[str, object] | None:
+        if value is None:
+            return None
+        forbidden_fragments = ("account_number", "routing_number", "iban", "swift", "password", "secret", "token", "key")
+        lower_keys = {str(key).lower() for key in value}
+        if any(any(fragment in key for fragment in forbidden_fragments) for key in lower_keys):
+            raise ValueError("provider_metadata must not contain plaintext banking credentials or payment secrets")
+        return value
+
+
+class PartnerPayoutAccountUpdate(BaseModel):
+    destination_label: str | None = Field(None, min_length=2, max_length=160)
+    provider_metadata: dict[str, object] | None = None
+    status: PartnerPayoutAccountStatus | None = None
+    verification_status: PartnerPayoutVerificationStatus | None = None
+
+    @field_validator("provider_metadata")
+    @classmethod
+    def reject_sensitive_metadata(cls, value: dict[str, object] | None) -> dict[str, object] | None:
+        return PartnerPayoutAccountCreate.reject_sensitive_metadata(value)
+
+
+class PartnerPayoutAccountResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    provider_type: PartnerPayoutProviderType
+    destination_label: str
+    destination_reference: str
+    currency: str
+    status: PartnerPayoutAccountStatus
+    verification_status: PartnerPayoutVerificationStatus
+    idempotency_key: str
+    created_by_user_id: int | None
+    updated_by_user_id: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PartnerPayoutCreate(BaseModel):
+    settlement_id: UUID
+    payout_account_id: UUID
+    idempotency_key: str = Field(..., min_length=8, max_length=160)
+
+
+class PartnerPayoutExecuteRequest(BaseModel):
+    idempotency_key: str = Field(..., min_length=8, max_length=160)
+
+
+class PartnerPayoutResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    settlement_id: UUID
+    payout_account_id: UUID
+    amount: Decimal
+    currency: str
+    status: PartnerPayoutStatus
+    provider_type: PartnerPayoutProviderType
+    provider_payout_id: str | None
+    provider_transaction_id: str | None
+    provider_execution_key: str | None
+    idempotency_key: str
+    failure_code: str | None
+    failure_reason: str | None
+    created_by_user_id: int | None
+    approved_by_user_id: int | None
+    created_at: datetime
+    approved_at: datetime | None
+    executed_at: datetime | None
+    paid_at: datetime | None
+    cancelled_at: datetime | None
+    updated_at: datetime
+
+
+class PartnerReconciliationCreate(BaseModel):
+    provider_type: PartnerPayoutProviderType = PartnerPayoutProviderType.MOCK
+    provider_transaction_id: str = Field(..., min_length=4, max_length=160)
+    reported_amount: Decimal = Field(..., ge=Decimal("0"))
+    reported_currency: str = Field(..., min_length=3, max_length=3)
+    provider_status: str = Field(..., min_length=2, max_length=80)
+    idempotency_key: str = Field(..., min_length=8, max_length=160)
+
+
+class PartnerReconciliationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    payout_id: UUID | None
+    provider_type: PartnerPayoutProviderType
+    provider_transaction_id: str
+    reported_amount: Decimal
+    reported_currency: str
+    provider_status: str
+    outcome: PartnerPayoutReconciliationOutcome
+    details_json: dict[str, object] | None
+    idempotency_key: str
+    reconciled_by_user_id: int | None
+    created_at: datetime
+
+
+class PartnerPayoutAuditLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    payout_account_id: UUID | None
+    payout_id: UUID | None
+    reconciliation_id: UUID | None
+    action: PartnerPayoutAuditAction
+    actor_user_id: int | None
+    provider_reference: str | None
     before_json: dict[str, object] | None
     after_json: dict[str, object] | None
     created_at: datetime

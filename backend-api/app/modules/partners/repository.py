@@ -20,6 +20,12 @@ from app.modules.partners.models import (
     PartnerEntitlement,
     PartnerEntitlementStatus,
     PartnerFinancialAuditLog,
+    PartnerPayout,
+    PartnerPayoutAccount,
+    PartnerPayoutAuditLog,
+    PartnerPayoutProviderType,
+    PartnerPayoutReconciliation,
+    PartnerPayoutStatus,
     PartnerRevenueShareAgreement,
     PartnerSettlementStatement,
     PartnerUsageMeter,
@@ -300,5 +306,185 @@ class PartnerRepository:
             self.db.query(PartnerFinancialAuditLog)
             .filter(PartnerFinancialAuditLog.partner_id == partner_id)
             .order_by(PartnerFinancialAuditLog.created_at.desc())
+            .all()
+        )
+
+    def get_payout_account_by_idempotency_key(
+        self, partner_id: UUID, idempotency_key: str
+    ) -> PartnerPayoutAccount | None:
+        return (
+            self.db.query(PartnerPayoutAccount)
+            .filter(
+                PartnerPayoutAccount.partner_id == partner_id,
+                PartnerPayoutAccount.idempotency_key == idempotency_key,
+            )
+            .one_or_none()
+        )
+
+    def create_payout_account(
+        self, account: PartnerPayoutAccount, audit: PartnerPayoutAuditLog
+    ) -> PartnerPayoutAccount:
+        existing = self.get_payout_account_by_idempotency_key(account.partner_id, account.idempotency_key)
+        if existing is not None:
+            return existing
+        self.db.add(account)
+        self.db.flush()
+        audit.partner_id = account.partner_id
+        audit.payout_account_id = account.id
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(account)
+        return account
+
+    def list_payout_accounts(self, partner_id: UUID) -> list[PartnerPayoutAccount]:
+        return (
+            self.db.query(PartnerPayoutAccount)
+            .filter(PartnerPayoutAccount.partner_id == partner_id)
+            .order_by(PartnerPayoutAccount.created_at.desc())
+            .all()
+        )
+
+    def get_payout_account(self, partner_id: UUID, account_id: UUID) -> PartnerPayoutAccount | None:
+        return (
+            self.db.query(PartnerPayoutAccount)
+            .filter(PartnerPayoutAccount.partner_id == partner_id, PartnerPayoutAccount.id == account_id)
+            .one_or_none()
+        )
+
+    def update_payout_account(
+        self, account: PartnerPayoutAccount, audit: PartnerPayoutAuditLog
+    ) -> PartnerPayoutAccount:
+        self.db.add(account)
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(account)
+        return account
+
+    def get_payout_by_idempotency_key(self, partner_id: UUID, idempotency_key: str) -> PartnerPayout | None:
+        return (
+            self.db.query(PartnerPayout)
+            .filter(PartnerPayout.partner_id == partner_id, PartnerPayout.idempotency_key == idempotency_key)
+            .one_or_none()
+        )
+
+    def get_payout_by_settlement(self, partner_id: UUID, settlement_id: UUID) -> PartnerPayout | None:
+        return (
+            self.db.query(PartnerPayout)
+            .filter(PartnerPayout.partner_id == partner_id, PartnerPayout.settlement_id == settlement_id)
+            .one_or_none()
+        )
+
+    def create_payout(self, payout: PartnerPayout, audit: PartnerPayoutAuditLog) -> PartnerPayout:
+        existing = self.get_payout_by_idempotency_key(payout.partner_id, payout.idempotency_key)
+        if existing is not None:
+            return existing
+        existing_settlement = self.get_payout_by_settlement(payout.partner_id, payout.settlement_id)
+        if existing_settlement is not None:
+            return existing_settlement
+        self.db.add(payout)
+        self.db.flush()
+        audit.partner_id = payout.partner_id
+        audit.payout_id = payout.id
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(payout)
+        return payout
+
+    def list_payouts(self, partner_id: UUID, status: PartnerPayoutStatus | None = None) -> list[PartnerPayout]:
+        query = self.db.query(PartnerPayout).filter(PartnerPayout.partner_id == partner_id)
+        if status is not None:
+            query = query.filter(PartnerPayout.status == status)
+        return query.order_by(PartnerPayout.created_at.desc()).all()
+
+    def get_payout(self, partner_id: UUID, payout_id: UUID) -> PartnerPayout | None:
+        return (
+            self.db.query(PartnerPayout)
+            .filter(PartnerPayout.partner_id == partner_id, PartnerPayout.id == payout_id)
+            .one_or_none()
+        )
+
+    def get_payout_by_provider_transaction(
+        self, partner_id: UUID, provider_type: PartnerPayoutProviderType, provider_transaction_id: str
+    ) -> PartnerPayout | None:
+        return (
+            self.db.query(PartnerPayout)
+            .filter(
+                PartnerPayout.partner_id == partner_id,
+                PartnerPayout.provider_type == provider_type,
+                PartnerPayout.provider_transaction_id == provider_transaction_id,
+            )
+            .one_or_none()
+        )
+
+    def count_reconciliations_by_provider_transaction(
+        self, provider_type: PartnerPayoutProviderType, provider_transaction_id: str
+    ) -> int:
+        return int(
+            self.db.query(func.count(PartnerPayoutReconciliation.id))
+            .filter(
+                PartnerPayoutReconciliation.provider_type == provider_type,
+                PartnerPayoutReconciliation.provider_transaction_id == provider_transaction_id,
+            )
+            .scalar()
+            or 0
+        )
+
+    def update_payout(
+        self,
+        payout: PartnerPayout,
+        audit: PartnerPayoutAuditLog,
+        settlement: PartnerSettlementStatement | None = None,
+    ) -> PartnerPayout:
+        self.db.add(payout)
+        if settlement is not None:
+            self.db.add(settlement)
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(payout)
+        return payout
+
+    def get_reconciliation_by_idempotency_key(
+        self, partner_id: UUID, idempotency_key: str
+    ) -> PartnerPayoutReconciliation | None:
+        return (
+            self.db.query(PartnerPayoutReconciliation)
+            .filter(
+                PartnerPayoutReconciliation.partner_id == partner_id,
+                PartnerPayoutReconciliation.idempotency_key == idempotency_key,
+            )
+            .one_or_none()
+        )
+
+    def create_reconciliation(
+        self, reconciliation: PartnerPayoutReconciliation, audit: PartnerPayoutAuditLog
+    ) -> PartnerPayoutReconciliation:
+        existing = self.get_reconciliation_by_idempotency_key(
+            reconciliation.partner_id, reconciliation.idempotency_key
+        )
+        if existing is not None:
+            return existing
+        self.db.add(reconciliation)
+        self.db.flush()
+        audit.partner_id = reconciliation.partner_id
+        audit.payout_id = reconciliation.payout_id
+        audit.reconciliation_id = reconciliation.id
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(reconciliation)
+        return reconciliation
+
+    def list_reconciliations(self, partner_id: UUID) -> list[PartnerPayoutReconciliation]:
+        return (
+            self.db.query(PartnerPayoutReconciliation)
+            .filter(PartnerPayoutReconciliation.partner_id == partner_id)
+            .order_by(PartnerPayoutReconciliation.created_at.desc())
+            .all()
+        )
+
+    def list_payout_audits(self, partner_id: UUID) -> list[PartnerPayoutAuditLog]:
+        return (
+            self.db.query(PartnerPayoutAuditLog)
+            .filter(PartnerPayoutAuditLog.partner_id == partner_id)
+            .order_by(PartnerPayoutAuditLog.created_at.desc())
             .all()
         )

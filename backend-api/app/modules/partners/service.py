@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from cryptography.fernet import Fernet
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
@@ -26,12 +27,22 @@ from app.modules.partners.models import (
     PartnerEntitlement,
     PartnerFinancialAuditAction,
     PartnerFinancialAuditLog,
+    PartnerPayout,
+    PartnerPayoutAccount,
+    PartnerPayoutAccountStatus,
+    PartnerPayoutAuditAction,
+    PartnerPayoutAuditLog,
+    PartnerPayoutReconciliation,
+    PartnerPayoutReconciliationOutcome,
+    PartnerPayoutStatus,
+    PartnerPayoutVerificationStatus,
     PartnerRevenueShareAgreement,
     PartnerSettlementStatement,
     PartnerUsageMeter,
     RevenueShareRuleType,
     SettlementStatus,
 )
+from app.modules.partners.providers import ProviderPayoutRequest, get_payment_provider
 from app.modules.partners.repository import PartnerRepository
 from app.modules.partners.schemas import (
     EmbedAuthorizeRequest,
@@ -48,6 +59,15 @@ from app.modules.partners.schemas import (
     PartnerEmbedEventCreate,
     PartnerEntitlementCreate,
     PartnerFinancialAuditLogResponse,
+    PartnerPayoutAccountCreate,
+    PartnerPayoutAccountResponse,
+    PartnerPayoutAccountUpdate,
+    PartnerPayoutAuditLogResponse,
+    PartnerPayoutCreate,
+    PartnerPayoutExecuteRequest,
+    PartnerPayoutResponse,
+    PartnerReconciliationCreate,
+    PartnerReconciliationResponse,
     PartnerRevenueShareAgreementCreate,
     PartnerRevenueShareAgreementResponse,
     PartnerSettlementGenerateRequest,
@@ -102,6 +122,7 @@ class PartnerSyndicationService:
     def __init__(self, repo: PartnerRepository, signing_secret: str | None = None) -> None:
         self.repo = repo
         self.signing_secret = signing_secret or settings.EMBED_SIGNING_SECRET.get_secret_value()
+        self._fernet = Fernet(base64.urlsafe_b64encode(hashlib.sha256(self.signing_secret.encode("utf-8")).digest()))
 
     def create_partner(self, payload: PartnerCreate, created_by_user_id: int | None) -> PartnerCreateResponse:
         raw_secret = f"gntv_pk_{secrets.token_urlsafe(24)}"
@@ -451,6 +472,468 @@ class PartnerSyndicationService:
             for item in self.repo.list_financial_audits(partner_id)
         ]
 
+    def _payout_audit(
+        self,
+        partner_id: UUID,
+        action: PartnerPayoutAuditAction,
+        actor_user_id: int | None,
+        before: dict[str, Any] | None = None,
+        after: dict[str, Any] | None = None,
+        payout_account_id: UUID | None = None,
+        payout_id: UUID | None = None,
+        reconciliation_id: UUID | None = None,
+        provider_reference: str | None = None,
+    ) -> PartnerPayoutAuditLog:
+        return PartnerPayoutAuditLog(
+            partner_id=partner_id,
+            payout_account_id=payout_account_id,
+            payout_id=payout_id,
+            reconciliation_id=reconciliation_id,
+            action=action,
+            actor_user_id=actor_user_id,
+            provider_reference=provider_reference,
+            before_json=before,
+            after_json=after,
+        )
+
+    def create_payout_account(
+        self, partner_id: UUID, payload: PartnerPayoutAccountCreate, actor_user_id: int | None = None
+    ) -> PartnerPayoutAccountResponse:
+        self.get_partner(partner_id)
+        existing = self.repo.get_payout_account_by_idempotency_key(partner_id, payload.idempotency_key)
+        if existing is not None:
+            return PartnerPayoutAccountResponse.model_validate(existing)
+
+        account = PartnerPayoutAccount(
+            partner_id=partner_id,
+            provider_type=payload.provider_type,
+            destination_label=payload.destination_label,
+            destination_reference=payload.destination_reference,
+            encrypted_provider_metadata=self._seal_provider_metadata(payload.provider_metadata),
+            currency=payload.currency.upper(),
+            status=PartnerPayoutAccountStatus.ENABLED,
+            verification_status=payload.verification_status,
+            idempotency_key=payload.idempotency_key,
+            created_by_user_id=actor_user_id,
+            updated_by_user_id=actor_user_id,
+        )
+        audit = self._payout_audit(
+            partner_id=partner_id,
+            action=PartnerPayoutAuditAction.PAYOUT_ACCOUNT_CREATED,
+            actor_user_id=actor_user_id,
+            after={
+                "provider_type": payload.provider_type.value,
+                "destination_label": payload.destination_label,
+                "currency": payload.currency.upper(),
+                "status": PartnerPayoutAccountStatus.ENABLED.value,
+                "verification_status": payload.verification_status.value,
+            },
+        )
+        return PartnerPayoutAccountResponse.model_validate(self.repo.create_payout_account(account, audit))
+
+    def update_payout_account(
+        self,
+        partner_id: UUID,
+        account_id: UUID,
+        payload: PartnerPayoutAccountUpdate,
+        actor_user_id: int | None = None,
+    ) -> PartnerPayoutAccountResponse:
+        self.get_partner(partner_id)
+        account = self.repo.get_payout_account(partner_id, account_id)
+        if account is None:
+            raise ValueError("Payout account not found")
+
+        before = {
+            "destination_label": account.destination_label,
+            "status": account.status.value,
+            "verification_status": account.verification_status.value,
+        }
+
+        if payload.destination_label is not None:
+            account.destination_label = payload.destination_label
+        if payload.status is not None:
+            account.status = payload.status
+        if payload.verification_status is not None:
+            account.verification_status = payload.verification_status
+        if payload.provider_metadata is not None:
+            account.encrypted_provider_metadata = self._seal_provider_metadata(payload.provider_metadata)
+
+        account.updated_by_user_id = actor_user_id
+        account.updated_at = utc_now()
+
+        after = {
+            "destination_label": account.destination_label,
+            "status": account.status.value,
+            "verification_status": account.verification_status.value,
+        }
+
+        audit = self._payout_audit(
+            partner_id=partner_id,
+            action=PartnerPayoutAuditAction.PAYOUT_ACCOUNT_UPDATED,
+            actor_user_id=actor_user_id,
+            payout_account_id=account.id,
+            before=before,
+            after=after,
+        )
+        return PartnerPayoutAccountResponse.model_validate(self.repo.update_payout_account(account, audit))
+
+    def list_payout_accounts(self, partner_id: UUID) -> list[PartnerPayoutAccountResponse]:
+        self.get_partner(partner_id)
+        return [PartnerPayoutAccountResponse.model_validate(item) for item in self.repo.list_payout_accounts(partner_id)]
+
+    def get_payout_account(self, partner_id: UUID, account_id: UUID) -> PartnerPayoutAccountResponse:
+        self.get_partner(partner_id)
+        account = self.repo.get_payout_account(partner_id, account_id)
+        if account is None:
+            raise ValueError("Payout account not found")
+        return PartnerPayoutAccountResponse.model_validate(account)
+
+    def create_payout(
+        self, partner_id: UUID, payload: PartnerPayoutCreate, actor_user_id: int | None = None
+    ) -> PartnerPayoutResponse:
+        self.get_partner(partner_id)
+        existing = self.repo.get_payout_by_idempotency_key(partner_id, payload.idempotency_key)
+        if existing is not None:
+            return PartnerPayoutResponse.model_validate(existing)
+
+        statement = self.repo.get_settlement(partner_id, payload.settlement_id)
+        if statement is None:
+            raise ValueError("Settlement statement not found")
+
+        if statement.status != SettlementStatus.FINALIZED:
+            raise PartnerSecurityError(
+                f"Only finalized settlement statements are eligible for payout. Current status: {statement.status.value}"
+            )
+
+        existing_settlement_payout = self.repo.get_payout_by_settlement(partner_id, payload.settlement_id)
+        if existing_settlement_payout is not None:
+            raise PartnerSecurityError("A payout instruction already exists for this settlement statement")
+
+        account = self.repo.get_payout_account(partner_id, payload.payout_account_id)
+        if account is None:
+            raise ValueError("Payout account not found")
+        if account.status != PartnerPayoutAccountStatus.ENABLED:
+            raise PartnerSecurityError("Payout account is disabled")
+        if account.verification_status == PartnerPayoutVerificationStatus.FAILED:
+            raise PartnerSecurityError("Payout account verification failed")
+
+        if statement.currency.upper() != account.currency.upper():
+            raise PartnerSecurityError(
+                f"Currency mismatch: statement has {statement.currency}, account has {account.currency}"
+            )
+
+        if statement.net_settlement_amount <= Decimal("0"):
+            raise PartnerSecurityError("Net settlement amount must be positive for payout")
+
+        payout = PartnerPayout(
+            partner_id=partner_id,
+            settlement_id=statement.id,
+            payout_account_id=account.id,
+            amount=self._decimal_money(statement.net_settlement_amount),
+            currency=statement.currency.upper(),
+            status=PartnerPayoutStatus.PENDING,
+            provider_type=account.provider_type,
+            idempotency_key=payload.idempotency_key,
+            created_by_user_id=actor_user_id,
+        )
+        audit = self._payout_audit(
+            partner_id=partner_id,
+            action=PartnerPayoutAuditAction.PAYOUT_CREATED,
+            actor_user_id=actor_user_id,
+            payout_account_id=account.id,
+            after={
+                "settlement_id": str(statement.id),
+                "payout_account_id": str(account.id),
+                "amount": self._money(statement.net_settlement_amount),
+                "currency": statement.currency.upper(),
+                "status": PartnerPayoutStatus.PENDING.value,
+            },
+        )
+        return PartnerPayoutResponse.model_validate(self.repo.create_payout(payout, audit))
+
+    def approve_payout(
+        self, partner_id: UUID, payout_id: UUID, actor_user_id: int | None = None
+    ) -> PartnerPayoutResponse:
+        self.get_partner(partner_id)
+        payout = self.repo.get_payout(partner_id, payout_id)
+        if payout is None:
+            raise ValueError("Payout not found")
+
+        if payout.status != PartnerPayoutStatus.PENDING:
+            raise PartnerSecurityError(
+                f"Payout can only be approved from pending status. Current status: {payout.status.value}"
+            )
+
+        before = {"status": payout.status.value}
+        payout.status = PartnerPayoutStatus.APPROVED
+        payout.approved_by_user_id = actor_user_id
+        payout.approved_at = utc_now()
+        payout.updated_at = utc_now()
+
+        after = {
+            "status": payout.status.value,
+            "approved_by_user_id": actor_user_id,
+            "approved_at": payout.approved_at.isoformat(),
+        }
+
+        audit = self._payout_audit(
+            partner_id=partner_id,
+            action=PartnerPayoutAuditAction.PAYOUT_APPROVED,
+            actor_user_id=actor_user_id,
+            payout_id=payout.id,
+            payout_account_id=payout.payout_account_id,
+            before=before,
+            after=after,
+        )
+        return PartnerPayoutResponse.model_validate(self.repo.update_payout(payout, audit))
+
+    def execute_payout(
+        self,
+        partner_id: UUID,
+        payout_id: UUID,
+        payload: PartnerPayoutExecuteRequest,
+        actor_user_id: int | None = None,
+    ) -> PartnerPayoutResponse:
+        self.get_partner(partner_id)
+        payout = self.repo.get_payout(partner_id, payout_id)
+        if payout is None:
+            raise ValueError("Payout not found")
+
+        if payout.status == PartnerPayoutStatus.PAID and payout.provider_execution_key == payload.idempotency_key:
+            return PartnerPayoutResponse.model_validate(payout)
+
+        if payout.status != PartnerPayoutStatus.APPROVED:
+            raise PartnerSecurityError(
+                f"Payout must be approved before execution. Current status: {payout.status.value}"
+            )
+
+        statement = self.repo.get_settlement(partner_id, payout.settlement_id)
+        if statement is None:
+            raise ValueError("Settlement statement associated with payout not found")
+
+        account = self.repo.get_payout_account(partner_id, payout.payout_account_id)
+        if account is None:
+            raise ValueError("Payout account associated with payout not found")
+
+        payout.provider_execution_key = payload.idempotency_key
+        payout.executed_at = utc_now()
+
+        provider = get_payment_provider(payout.provider_type.value)
+        req = ProviderPayoutRequest(
+            partner_id=partner_id,
+            payout_id=payout.id,
+            amount=payout.amount,
+            currency=payout.currency,
+            destination_reference=account.destination_reference,
+            destination_routing=None,
+            idempotency_key=payload.idempotency_key,
+            metadata={"destination_label": account.destination_label},
+        )
+        result = provider.create_payout(req)
+
+        if result.success:
+            before = {"status": payout.status.value}
+            payout.status = PartnerPayoutStatus.PAID
+            payout.provider_payout_id = result.provider_transaction_id
+            payout.provider_transaction_id = result.provider_transaction_id
+            payout.paid_at = utc_now()
+            payout.updated_at = utc_now()
+
+
+            after = {
+                "status": payout.status.value,
+                "provider_payout_id": payout.provider_payout_id,
+                "provider_transaction_id": payout.provider_transaction_id,
+                "paid_at": payout.paid_at.isoformat(),
+            }
+            audit = self._payout_audit(
+                partner_id=partner_id,
+                action=PartnerPayoutAuditAction.PAYOUT_EXECUTED,
+                actor_user_id=actor_user_id,
+                payout_id=payout.id,
+                payout_account_id=payout.payout_account_id,
+                provider_reference=result.provider_transaction_id,
+                before=before,
+                after=after,
+            )
+            return PartnerPayoutResponse.model_validate(
+                self.repo.update_payout(payout, audit)
+            )
+        else:
+            before = {"status": payout.status.value}
+            payout.status = PartnerPayoutStatus.FAILED
+            payout.failure_code = "provider_failure"
+            payout.failure_reason = result.error_message
+            payout.updated_at = utc_now()
+
+            after = {
+                "status": payout.status.value,
+                "failure_code": payout.failure_code or "",
+                "failure_reason": payout.failure_reason or "",
+            }
+            audit = self._payout_audit(
+                partner_id=partner_id,
+                action=PartnerPayoutAuditAction.PAYOUT_FAILED,
+                actor_user_id=actor_user_id,
+                payout_id=payout.id,
+                payout_account_id=payout.payout_account_id,
+                before=before,
+                after=after,
+            )
+            return PartnerPayoutResponse.model_validate(self.repo.update_payout(payout, audit))
+
+    def cancel_payout(
+        self,
+        partner_id: UUID,
+        payout_id: UUID,
+        reason: str | None = None,
+        actor_user_id: int | None = None,
+    ) -> PartnerPayoutResponse:
+        self.get_partner(partner_id)
+        payout = self.repo.get_payout(partner_id, payout_id)
+        if payout is None:
+            raise ValueError("Payout not found")
+
+        if payout.status not in (PartnerPayoutStatus.PENDING, PartnerPayoutStatus.APPROVED):
+            raise PartnerSecurityError(
+                f"Cannot cancel payout in status: {payout.status.value}"
+            )
+
+        before = {"status": payout.status.value}
+        payout.status = PartnerPayoutStatus.CANCELLED
+        payout.cancelled_at = utc_now()
+        payout.failure_reason = reason or "Cancelled by operator"
+        payout.updated_at = utc_now()
+
+        after = {
+            "status": payout.status.value,
+            "reason": payout.failure_reason,
+            "cancelled_at": payout.cancelled_at.isoformat(),
+        }
+        audit = self._payout_audit(
+            partner_id=partner_id,
+            action=PartnerPayoutAuditAction.PAYOUT_CANCELLED,
+            actor_user_id=actor_user_id,
+            payout_id=payout.id,
+            payout_account_id=payout.payout_account_id,
+            before=before,
+            after=after,
+        )
+        return PartnerPayoutResponse.model_validate(self.repo.update_payout(payout, audit))
+
+    def list_payouts(
+        self, partner_id: UUID, status: PartnerPayoutStatus | None = None
+    ) -> list[PartnerPayoutResponse]:
+        self.get_partner(partner_id)
+        return [PartnerPayoutResponse.model_validate(item) for item in self.repo.list_payouts(partner_id, status=status)]
+
+    def get_payout(self, partner_id: UUID, payout_id: UUID) -> PartnerPayoutResponse:
+        self.get_partner(partner_id)
+        payout = self.repo.get_payout(partner_id, payout_id)
+        if payout is None:
+            raise ValueError("Payout not found")
+        return PartnerPayoutResponse.model_validate(payout)
+
+    def reconcile_payout(
+        self, partner_id: UUID, payload: PartnerReconciliationCreate, actor_user_id: int | None = None
+    ) -> PartnerReconciliationResponse:
+        self.get_partner(partner_id)
+        existing = self.repo.get_reconciliation_by_idempotency_key(partner_id, payload.idempotency_key)
+        if existing is not None:
+            return PartnerReconciliationResponse.model_validate(existing)
+
+        matched_payout = self.repo.get_payout_by_provider_transaction(
+            partner_id, payload.provider_type, payload.provider_transaction_id
+        )
+        duplicate_count = self.repo.count_reconciliations_by_provider_transaction(
+            payload.provider_type, payload.provider_transaction_id
+        )
+
+        if matched_payout is None:
+            payouts = self.repo.list_payouts(partner_id)
+            for p in payouts:
+                if p.provider_payout_id == payload.provider_transaction_id or p.provider_transaction_id == payload.provider_transaction_id:
+                    matched_payout = p
+                    break
+
+        details: dict[str, Any] = {
+            "reported_amount": self._money(payload.reported_amount),
+            "reported_currency": payload.reported_currency.upper(),
+            "provider_status": payload.provider_status,
+        }
+
+        outcome: PartnerPayoutReconciliationOutcome
+        if duplicate_count > 0:
+            outcome = PartnerPayoutReconciliationOutcome.DUPLICATE_PROVIDER_TRANSACTION
+            details["note"] = "Duplicate provider transaction ID already reconciled"
+        elif matched_payout is None:
+            outcome = PartnerPayoutReconciliationOutcome.UNKNOWN_TRANSACTION
+            details["note"] = "No matching payout instruction found in system"
+        else:
+            if matched_payout.partner_id != partner_id:
+                raise ValueError("Payout not found")
+            details["expected_amount"] = self._money(matched_payout.amount)
+            details["expected_currency"] = matched_payout.currency.upper()
+            if payload.provider_status.lower() in ("failed", "rejected", "returned", "reversed"):
+                outcome = PartnerPayoutReconciliationOutcome.FAILED_OR_RETURNED
+                details["note"] = f"Provider reported failure status: {payload.provider_status}"
+                matched_payout.status = PartnerPayoutStatus.REVERSED
+                matched_payout.updated_at = utc_now()
+                self.repo.db.add(matched_payout)
+            elif payload.reported_currency.upper() != matched_payout.currency.upper():
+                outcome = PartnerPayoutReconciliationOutcome.CURRENCY_MISMATCH
+                details["note"] = f"Currency mismatch: expected {matched_payout.currency}, got {payload.reported_currency}"
+            elif self._decimal_money(payload.reported_amount) != self._decimal_money(matched_payout.amount):
+                outcome = PartnerPayoutReconciliationOutcome.AMOUNT_MISMATCH
+                details["note"] = f"Amount mismatch: expected {self._money(matched_payout.amount)}, got {self._money(payload.reported_amount)}"
+            else:
+                outcome = PartnerPayoutReconciliationOutcome.MATCHED
+                details["note"] = "Deterministic match across amount, currency, and provider transaction"
+
+        reconciliation = PartnerPayoutReconciliation(
+            partner_id=partner_id,
+            payout_id=matched_payout.id if matched_payout else None,
+            provider_type=payload.provider_type,
+            provider_transaction_id=payload.provider_transaction_id,
+            reported_amount=self._decimal_money(payload.reported_amount),
+            reported_currency=payload.reported_currency.upper(),
+            provider_status=payload.provider_status,
+            outcome=outcome,
+            details_json=details,
+            idempotency_key=payload.idempotency_key,
+            reconciled_by_user_id=actor_user_id,
+        )
+
+        audit = self._payout_audit(
+            partner_id=partner_id,
+            action=PartnerPayoutAuditAction.PAYOUT_RECONCILED,
+            actor_user_id=actor_user_id,
+            payout_id=matched_payout.id if matched_payout else None,
+            reconciliation_id=None,
+            provider_reference=payload.provider_transaction_id,
+            after={
+                "outcome": outcome.value,
+                "provider_transaction_id": payload.provider_transaction_id,
+                "details": details,
+            },
+        )
+        return PartnerReconciliationResponse.model_validate(self.repo.create_reconciliation(reconciliation, audit))
+
+    def list_reconciliations(self, partner_id: UUID) -> list[PartnerReconciliationResponse]:
+        self.get_partner(partner_id)
+        return [
+            PartnerReconciliationResponse.model_validate(item)
+            for item in self.repo.list_reconciliations(partner_id)
+        ]
+
+    def list_payout_audit_logs(self, partner_id: UUID) -> list[PartnerPayoutAuditLogResponse]:
+        self.get_partner(partner_id)
+        return [
+            PartnerPayoutAuditLogResponse.model_validate(item)
+            for item in self.repo.list_payout_audits(partner_id)
+        ]
+
+
     def verify_token(self, token: str) -> dict[str, Any]:
         parts = token.split(".")
         if len(parts) != 4 or ".".join(parts[:2]) != self.token_prefix:
@@ -589,3 +1072,9 @@ class PartnerSyndicationService:
 
     def _rate(self, value: Decimal) -> str:
         return str(Decimal(str(value)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+
+    def _seal_provider_metadata(self, value: dict[str, object] | None) -> str | None:
+        if value is None:
+            return None
+        payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return self._fernet.encrypt(payload).decode("ascii")
