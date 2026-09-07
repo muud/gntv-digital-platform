@@ -26,6 +26,8 @@ from app.modules.partners.models import (
     PartnerPayoutProviderType,
     PartnerPayoutReconciliation,
     PartnerPayoutStatus,
+    PartnerPortalEvent,
+    PartnerPortalUser,
     PartnerRevenueShareAgreement,
     PartnerSettlementStatement,
     PartnerUsageMeter,
@@ -76,6 +78,14 @@ class PartnerRepository:
             .options(joinedload(Partner.branding), joinedload(Partner.domains), joinedload(Partner.entitlements))
             .filter(Partner.id == partner_id, Partner.status == PartnerStatus.ACTIVE)
             .one_or_none()
+        )
+
+    def list_credentials_by_prefix(self, key_prefix: str) -> list[PartnerApiCredential]:
+        return (
+            self.db.query(PartnerApiCredential)
+            .options(joinedload(PartnerApiCredential.partner))
+            .filter(PartnerApiCredential.key_prefix == key_prefix)
+            .all()
         )
 
     def create_domain(self, domain: PartnerDomain) -> PartnerDomain:
@@ -223,6 +233,8 @@ class PartnerRepository:
         period_start: datetime | None = None,
         period_end: datetime | None = None,
         currency: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[PartnerUsageMeter]:
         query = self.db.query(PartnerUsageMeter).filter(PartnerUsageMeter.partner_id == partner_id)
         if period_start is not None:
@@ -231,7 +243,10 @@ class PartnerRepository:
             query = query.filter(PartnerUsageMeter.occurred_at < period_end)
         if currency is not None:
             query = query.filter(PartnerUsageMeter.currency == currency)
-        return query.order_by(PartnerUsageMeter.occurred_at.asc()).all()
+        query = query.order_by(PartnerUsageMeter.occurred_at.asc()).offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     def get_settlement_by_idempotency_key(
         self, partner_id: UUID, idempotency_key: str
@@ -274,13 +289,26 @@ class PartnerRepository:
         self.db.refresh(statement)
         return statement
 
-    def list_settlements(self, partner_id: UUID) -> list[PartnerSettlementStatement]:
-        return (
-            self.db.query(PartnerSettlementStatement)
-            .filter(PartnerSettlementStatement.partner_id == partner_id)
-            .order_by(PartnerSettlementStatement.period_start.desc())
-            .all()
-        )
+    def list_settlements(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[PartnerSettlementStatement]:
+        query = self.db.query(PartnerSettlementStatement).filter(PartnerSettlementStatement.partner_id == partner_id)
+        if period_start is not None:
+            query = query.filter(PartnerSettlementStatement.period_end > period_start)
+        if period_end is not None:
+            query = query.filter(PartnerSettlementStatement.period_start < period_end)
+        if currency is not None:
+            query = query.filter(PartnerSettlementStatement.currency == currency)
+        query = query.order_by(PartnerSettlementStatement.period_start.desc()).offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     def get_settlement(self, partner_id: UUID, statement_id: UUID) -> PartnerSettlementStatement | None:
         return (
@@ -390,11 +418,29 @@ class PartnerRepository:
         self.db.refresh(payout)
         return payout
 
-    def list_payouts(self, partner_id: UUID, status: PartnerPayoutStatus | None = None) -> list[PartnerPayout]:
+    def list_payouts(
+        self,
+        partner_id: UUID,
+        status: PartnerPayoutStatus | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        currency: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[PartnerPayout]:
         query = self.db.query(PartnerPayout).filter(PartnerPayout.partner_id == partner_id)
         if status is not None:
             query = query.filter(PartnerPayout.status == status)
-        return query.order_by(PartnerPayout.created_at.desc()).all()
+        if created_after is not None:
+            query = query.filter(PartnerPayout.created_at >= created_after)
+        if created_before is not None:
+            query = query.filter(PartnerPayout.created_at < created_before)
+        if currency is not None:
+            query = query.filter(PartnerPayout.currency == currency)
+        query = query.order_by(PartnerPayout.created_at.desc()).offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     def get_payout(self, partner_id: UUID, payout_id: UUID) -> PartnerPayout | None:
         return (
@@ -473,13 +519,23 @@ class PartnerRepository:
         self.db.refresh(reconciliation)
         return reconciliation
 
-    def list_reconciliations(self, partner_id: UUID) -> list[PartnerPayoutReconciliation]:
-        return (
-            self.db.query(PartnerPayoutReconciliation)
-            .filter(PartnerPayoutReconciliation.partner_id == partner_id)
-            .order_by(PartnerPayoutReconciliation.created_at.desc())
-            .all()
-        )
+    def list_reconciliations(
+        self,
+        partner_id: UUID,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[PartnerPayoutReconciliation]:
+        query = self.db.query(PartnerPayoutReconciliation).filter(PartnerPayoutReconciliation.partner_id == partner_id)
+        if created_after is not None:
+            query = query.filter(PartnerPayoutReconciliation.created_at >= created_after)
+        if created_before is not None:
+            query = query.filter(PartnerPayoutReconciliation.created_at < created_before)
+        query = query.order_by(PartnerPayoutReconciliation.created_at.desc()).offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
 
     def list_payout_audits(self, partner_id: UUID) -> list[PartnerPayoutAuditLog]:
         return (
@@ -488,3 +544,39 @@ class PartnerRepository:
             .order_by(PartnerPayoutAuditLog.created_at.desc())
             .all()
         )
+
+    def create_portal_event(self, event: PartnerPortalEvent) -> PartnerPortalEvent:
+        self.db.add(event)
+        self.db.commit()
+        self.db.refresh(event)
+        return event
+
+    def list_portal_events(
+        self,
+        partner_id: UUID,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> list[PartnerPortalEvent]:
+        query = self.db.query(PartnerPortalEvent).filter(
+            PartnerPortalEvent.partner_id == partner_id,
+            PartnerPortalEvent.visible_to_partner.is_(True),
+        )
+        if created_after is not None:
+            query = query.filter(PartnerPortalEvent.created_at >= created_after)
+        if created_before is not None:
+            query = query.filter(PartnerPortalEvent.created_at < created_before)
+        return query.order_by(PartnerPortalEvent.created_at.desc()).offset(offset).limit(limit).all()
+
+    def create_portal_user(self, portal_user: PartnerPortalUser) -> PartnerPortalUser:
+        self.db.add(portal_user)
+        self.db.commit()
+        self.db.refresh(portal_user)
+        return portal_user
+
+    def get_portal_user(self, user_id: int) -> PartnerPortalUser | None:
+        return self.db.query(PartnerPortalUser).filter(PartnerPortalUser.user_id == user_id).first()
+
+    def list_portal_users(self, partner_id: UUID) -> list[PartnerPortalUser]:
+        return self.db.query(PartnerPortalUser).filter(PartnerPortalUser.partner_id == partner_id).all()

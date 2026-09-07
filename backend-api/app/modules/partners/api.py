@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.modules.partners.models import PartnerCredentialStatus, PartnerPayoutStatus
+from app.modules.partners.models import Partner, PartnerCredentialStatus, PartnerPayoutStatus
 from app.modules.partners.repository import PartnerRepository
 from app.modules.partners.schemas import (
     EmbedAuthorizeRequest,
@@ -37,6 +37,16 @@ from app.modules.partners.schemas import (
     PartnerPayoutCreate,
     PartnerPayoutExecuteRequest,
     PartnerPayoutResponse,
+    PartnerPortalEventResponse,
+    PartnerPortalExportManifestResponse,
+    PartnerPortalMeResponse,
+    PartnerPortalOverviewResponse,
+    PartnerPortalPayoutResponse,
+    PartnerPortalReconciliationResponse,
+    PartnerPortalRevenueSummaryResponse,
+    PartnerPortalSettlementResponse,
+    PartnerPortalStatementResponse,
+    PartnerPortalUsageSummaryResponse,
     PartnerReconciliationCreate,
     PartnerReconciliationResponse,
     PartnerRevenueShareAgreementCreate,
@@ -53,6 +63,7 @@ from app.utils.jwt import decode_token
 
 partners_router = APIRouter(prefix="/api/v1/partners", tags=["Partner Syndication"])
 embed_router = APIRouter(prefix="/api/v1/embed", tags=["Embed SDK Authorization"])
+partner_portal_router = APIRouter(prefix="/api/v1/partner-portal", tags=["Partner Portal"])
 
 
 def get_service(db: Session = Depends(get_db)) -> PartnerSyndicationService:
@@ -114,6 +125,82 @@ def authenticate_partner_or_admin(
         detail="Valid partner API key or admin authorization required",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def require_partner_portal(
+    authorization: Annotated[str | None, Header()] = None,
+    x_partner_key: Annotated[str | None, Header()] = None,
+    x_partner_id: Annotated[str | None, Header()] = None,
+    db: Session = Depends(get_db),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> Partner:
+    partner_key = x_partner_key
+    if not partner_key and authorization and authorization.startswith("Bearer gntv_pk_"):
+        partner_key = authorization.split(" ", 1)[1]
+    if partner_key:
+        try:
+            return service.authenticate_partner_portal_key(partner_key)
+        except PartnerSecurityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        try:
+            payload = decode_token(token)
+            subject = payload.get("sub")
+            if subject is None:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+            user = db.query(User).filter(User.id == int(subject)).one_or_none()
+            if not user:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+            portal_user = service.repo.get_portal_user(user.id)
+            if portal_user:
+                partner = service.repo.get_partner(portal_user.partner_id)
+                if partner and partner.status.value == "active":
+                    return partner
+                elif partner:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Partner account is not active")
+
+            user_roles = set(user.role_names) if hasattr(user, "role_names") else {r.name for r in user.roles}
+            if {"admin", "operator", "super_admin"} & user_roles:
+                if x_partner_id:
+                    try:
+                        target_id = UUID(x_partner_id)
+                        partner = service.repo.get_partner(target_id)
+                        if partner:
+                            return partner
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partner not found")
+                    except ValueError:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Partner-Id")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Admin users must supply X-Partner-Id header to access partner portal",
+                )
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not authorized to access any partner portal",
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Valid partner portal key or authorization required",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
 
 
 @partners_router.post(
@@ -640,6 +727,269 @@ def list_partner_payout_audits(
         return service.list_payout_audit_logs(partner_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+# --- Partner Self-Service Portal Endpoints ---
+
+
+def _portal_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, PartnerSecurityError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@partner_portal_router.get("/me", response_model=PartnerPortalMeResponse, summary="Get authenticated partner profile")
+def get_partner_portal_me(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPortalMeResponse:
+    return service.portal_me(partner.id)
+
+
+@partner_portal_router.get(
+    "/overview",
+    response_model=PartnerPortalOverviewResponse,
+    summary="Get partner-facing financial and usage overview",
+)
+def get_partner_portal_overview(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+) -> PartnerPortalOverviewResponse:
+    try:
+        return service.portal_overview(partner.id, period_start, period_end, currency)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get("/usage", response_model=PartnerPortalUsageSummaryResponse, summary="Get partner usage report")
+def get_partner_portal_usage(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+    limit: int = Query(50, ge=1, le=250),
+    offset: int = Query(0, ge=0),
+) -> PartnerPortalUsageSummaryResponse:
+    try:
+        return service.portal_usage(partner.id, period_start, period_end, currency, limit, offset)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get(
+    "/revenue",
+    response_model=PartnerPortalRevenueSummaryResponse,
+    summary="Get partner revenue summary derived from settlement statements",
+)
+def get_partner_portal_revenue(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+) -> PartnerPortalRevenueSummaryResponse:
+    try:
+        return service.portal_revenue(partner.id, period_start, period_end, currency)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get(
+    "/settlements",
+    response_model=list[PartnerPortalSettlementResponse],
+    summary="List authenticated partner settlement statements",
+)
+def list_partner_portal_settlements(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+    limit: int = Query(50, ge=1, le=250),
+    offset: int = Query(0, ge=0),
+) -> list[PartnerPortalSettlementResponse]:
+    try:
+        return service.portal_settlements(partner.id, period_start, period_end, currency, limit, offset)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get(
+    "/payouts",
+    response_model=list[PartnerPortalPayoutResponse],
+    summary="List authenticated partner payout records",
+)
+def list_partner_portal_payouts(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+    limit: int = Query(50, ge=1, le=250),
+    offset: int = Query(0, ge=0),
+) -> list[PartnerPortalPayoutResponse]:
+    try:
+        return service.portal_payouts(partner.id, period_start, period_end, currency, limit, offset)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get(
+    "/reconciliation",
+    response_model=list[PartnerPortalReconciliationResponse],
+    summary="List authenticated partner reconciliation outcomes",
+)
+def list_partner_portal_reconciliations(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    limit: int = Query(50, ge=1, le=250),
+    offset: int = Query(0, ge=0),
+) -> list[PartnerPortalReconciliationResponse]:
+    try:
+        return service.portal_reconciliations(partner.id, period_start, period_end, limit, offset)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get(
+    "/statements",
+    response_model=list[PartnerPortalStatementResponse],
+    summary="Get structured partner statements suitable for later PDF generation",
+)
+def list_partner_portal_statements(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+    limit: int = Query(50, ge=1, le=250),
+    offset: int = Query(0, ge=0),
+) -> list[PartnerPortalStatementResponse]:
+    try:
+        return service.portal_statements(partner.id, period_start, period_end, currency, limit, offset)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get(
+    "/statements/{statement_id}",
+    response_model=PartnerPortalStatementResponse,
+    summary="Get single structured partner statement detail",
+)
+def get_partner_portal_statement_detail(
+    statement_id: UUID,
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerPortalStatementResponse:
+    try:
+        return service.portal_statement_detail(partner.id, statement_id)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.get(
+    "/exports",
+    response_model=None,
+    summary="Export authenticated partner usage and financial reports",
+)
+def export_partner_portal_report(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    report_type: str = Query("statements", pattern="^(usage|settlements|statements|payouts)$"),
+    export_format: str = Query("csv", alias="format", pattern="^(csv|json)$"),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+) -> Response | PartnerPortalExportManifestResponse:
+    try:
+        manifest = service.portal_export_manifest(partner.id, report_type, period_start, period_end, currency)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+    if export_format == "json":
+        return manifest
+    csv_payload = service.portal_export_csv(manifest)
+    filename = f"gntv-partner-{report_type}-{partner.id}.csv"
+    return Response(
+        content=csv_payload,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@partner_portal_router.get(
+    "/exports/usage",
+    response_model=None,
+    summary="Export authenticated partner usage records as CSV",
+)
+def export_partner_portal_usage_csv(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+) -> Response:
+    try:
+        manifest = service.portal_export_manifest(partner.id, "usage", period_start, period_end, currency)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+    csv_payload = service.portal_export_csv(manifest)
+    filename = f"gntv-partner-usage-{partner.id}.csv"
+    return Response(
+        content=csv_payload,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@partner_portal_router.get(
+    "/exports/financial",
+    response_model=None,
+    summary="Export authenticated partner financial records as CSV",
+)
+def export_partner_portal_financial_csv(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    currency: str | None = Query(None, min_length=3, max_length=3),
+) -> Response:
+    try:
+        manifest = service.portal_export_manifest(partner.id, "statements", period_start, period_end, currency)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
+    csv_payload = service.portal_export_csv(manifest)
+    filename = f"gntv-partner-financial-{partner.id}.csv"
+    return Response(
+        content=csv_payload,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+
+@partner_portal_router.get(
+    "/events",
+    response_model=list[PartnerPortalEventResponse],
+    summary="List partner-visible status feed events",
+)
+def list_partner_portal_events(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+    period_start: datetime | None = Query(None),
+    period_end: datetime | None = Query(None),
+    limit: int = Query(25, ge=1, le=250),
+    offset: int = Query(0, ge=0),
+) -> list[PartnerPortalEventResponse]:
+    try:
+        return service.portal_events(partner.id, period_start, period_end, limit, offset)
+    except ValueError as exc:
+        raise _portal_error(exc) from exc
 
 
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import csv
 from cryptography.fernet import Fernet
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 import hmac
+from io import StringIO
 import json
 import secrets
 from typing import Any
@@ -36,8 +38,13 @@ from app.modules.partners.models import (
     PartnerPayoutReconciliationOutcome,
     PartnerPayoutStatus,
     PartnerPayoutVerificationStatus,
+    PartnerPortalEvent,
+    PartnerPortalEventType,
+    PartnerPortalUser,
     PartnerRevenueShareAgreement,
+
     PartnerSettlementStatement,
+    PartnerStatus,
     PartnerUsageMeter,
     RevenueShareRuleType,
     SettlementStatus,
@@ -56,8 +63,10 @@ from app.modules.partners.schemas import (
     PartnerCreateResponse,
     PartnerCredentialResponse,
     PartnerDomainCreate,
+    PartnerDomainResponse,
     PartnerEmbedEventCreate,
     PartnerEntitlementCreate,
+    PartnerEntitlementResponse,
     PartnerFinancialAuditLogResponse,
     PartnerPayoutAccountCreate,
     PartnerPayoutAccountResponse,
@@ -66,6 +75,17 @@ from app.modules.partners.schemas import (
     PartnerPayoutCreate,
     PartnerPayoutExecuteRequest,
     PartnerPayoutResponse,
+    PartnerPortalEventResponse,
+    PartnerPortalExportManifestResponse,
+    PartnerPortalMeResponse,
+    PartnerPortalOverviewResponse,
+    PartnerPortalPayoutAccountSummary,
+    PartnerPortalPayoutResponse,
+    PartnerPortalReconciliationResponse,
+    PartnerPortalRevenueSummaryResponse,
+    PartnerPortalSettlementResponse,
+    PartnerPortalStatementResponse,
+    PartnerPortalUsageSummaryResponse,
     PartnerReconciliationCreate,
     PartnerReconciliationResponse,
     PartnerRevenueShareAgreementCreate,
@@ -463,7 +483,23 @@ class PartnerSyndicationService:
             before=before,
             after={"status": payload.status.value, "reason": payload.reason},
         )
-        return PartnerSettlementStatementResponse.model_validate(self.repo.update_settlement_status(statement, audit))
+        updated = self.repo.update_settlement_status(statement, audit)
+        if payload.status == SettlementStatus.FINALIZED:
+            self._record_portal_event(
+                partner_id=partner_id,
+                event_type=PartnerPortalEventType.SETTLEMENT_FINALIZED,
+                title="Settlement finalized",
+                message="A settlement statement has been finalized and is eligible for payout review.",
+                resource_type="settlement",
+                resource_id=updated.id,
+                payload={
+                    "net_settlement_amount": self._money(updated.net_settlement_amount),
+                    "currency": updated.currency,
+                    "period_start": updated.period_start.isoformat(),
+                    "period_end": updated.period_end.isoformat(),
+                },
+            )
+        return PartnerSettlementStatementResponse.model_validate(updated)
 
     def list_financial_audit_logs(self, partner_id: UUID) -> list[PartnerFinancialAuditLogResponse]:
         self.get_partner(partner_id)
@@ -614,8 +650,8 @@ class PartnerSyndicationService:
             raise ValueError("Payout account not found")
         if account.status != PartnerPayoutAccountStatus.ENABLED:
             raise PartnerSecurityError("Payout account is disabled")
-        if account.verification_status == PartnerPayoutVerificationStatus.FAILED:
-            raise PartnerSecurityError("Payout account verification failed")
+        if account.verification_status != PartnerPayoutVerificationStatus.VERIFIED:
+            raise PartnerSecurityError("Payout account must be verified before payout creation")
 
         if statement.currency.upper() != account.currency.upper():
             raise PartnerSecurityError(
@@ -685,7 +721,17 @@ class PartnerSyndicationService:
             before=before,
             after=after,
         )
-        return PartnerPayoutResponse.model_validate(self.repo.update_payout(payout, audit))
+        updated = self.repo.update_payout(payout, audit)
+        self._record_portal_event(
+            partner_id=partner_id,
+            event_type=PartnerPortalEventType.PAYOUT_APPROVED,
+            title="Payout approved",
+            message="A payout instruction has been approved for execution.",
+            resource_type="payout",
+            resource_id=updated.id,
+            payload={"status": updated.status.value, "amount": self._money(updated.amount), "currency": updated.currency},
+        )
+        return PartnerPayoutResponse.model_validate(updated)
 
     def execute_payout(
         self,
@@ -756,9 +802,23 @@ class PartnerSyndicationService:
                 before=before,
                 after=after,
             )
-            return PartnerPayoutResponse.model_validate(
-                self.repo.update_payout(payout, audit)
+            updated = self.repo.update_payout(payout, audit)
+            self._record_portal_event(
+                partner_id=partner_id,
+                event_type=PartnerPortalEventType.PAYOUT_PAID,
+                title="Payout paid",
+                message="A payout has been marked paid by the payment provider.",
+                resource_type="payout",
+                resource_id=updated.id,
+                severity="success",
+                payload={
+                    "status": updated.status.value,
+                    "amount": self._money(updated.amount),
+                    "currency": updated.currency,
+                    "provider_transaction_reference": updated.provider_transaction_id,
+                },
             )
+            return PartnerPayoutResponse.model_validate(updated)
         else:
             before = {"status": payout.status.value}
             payout.status = PartnerPayoutStatus.FAILED
@@ -780,7 +840,18 @@ class PartnerSyndicationService:
                 before=before,
                 after=after,
             )
-            return PartnerPayoutResponse.model_validate(self.repo.update_payout(payout, audit))
+            updated = self.repo.update_payout(payout, audit)
+            self._record_portal_event(
+                partner_id=partner_id,
+                event_type=PartnerPortalEventType.PAYOUT_FAILED,
+                title="Payout failed",
+                message="A payout could not be completed by the payment provider.",
+                resource_type="payout",
+                resource_id=updated.id,
+                severity="warning",
+                payload={"status": updated.status.value, "failure_code": updated.failure_code},
+            )
+            return PartnerPayoutResponse.model_validate(updated)
 
     def cancel_payout(
         self,
@@ -917,7 +988,22 @@ class PartnerSyndicationService:
                 "details": details,
             },
         )
-        return PartnerReconciliationResponse.model_validate(self.repo.create_reconciliation(reconciliation, audit))
+        created = self.repo.create_reconciliation(reconciliation, audit)
+        if outcome != PartnerPayoutReconciliationOutcome.MATCHED:
+            self._record_portal_event(
+                partner_id=partner_id,
+                event_type=PartnerPortalEventType.RECONCILIATION_EXCEPTION,
+                title="Reconciliation exception",
+                message="A payout reconciliation record requires review.",
+                resource_type="reconciliation",
+                resource_id=created.id,
+                severity="warning",
+                payload={
+                    "outcome": outcome.value,
+                    "provider_transaction_reference": payload.provider_transaction_id,
+                },
+            )
+        return PartnerReconciliationResponse.model_validate(created)
 
     def list_reconciliations(self, partner_id: UUID) -> list[PartnerReconciliationResponse]:
         self.get_partner(partner_id)
@@ -932,6 +1018,351 @@ class PartnerSyndicationService:
             PartnerPayoutAuditLogResponse.model_validate(item)
             for item in self.repo.list_payout_audits(partner_id)
         ]
+
+    def authenticate_partner_portal_key(self, raw_secret: str) -> Partner:
+        if not raw_secret.startswith("gntv_pk_"):
+            raise PartnerSecurityError("Valid partner portal key required")
+        key_prefix = raw_secret[:14]
+        for credential in self.repo.list_credentials_by_prefix(key_prefix):
+            if credential.status != PartnerCredentialStatus.ACTIVE:
+                continue
+            if self.verify_api_secret(raw_secret, credential.secret_hash):
+                partner = credential.partner
+                if partner is None or partner.status != PartnerStatus.ACTIVE:
+                    raise PartnerSecurityError("Partner portal access is not active")
+                credential.last_used_at = utc_now()
+                self.repo.db.add(credential)
+                self.repo.db.commit()
+                return partner
+        raise PartnerSecurityError("Valid partner portal key required")
+
+    def portal_me(self, partner_id: UUID) -> PartnerPortalMeResponse:
+        partner = self.get_partner(partner_id)
+        return PartnerPortalMeResponse(
+            partner=PartnerResponse.model_validate(partner),
+            authorized_domains=[PartnerDomainResponse.model_validate(item) for item in self.repo.list_domains(partner_id)],
+            entitlements=[PartnerEntitlementResponse.model_validate(item) for item in self.repo.list_entitlements(partner_id)],
+            payout_accounts=[self._portal_account(item) for item in self.repo.list_payout_accounts(partner_id)],
+        )
+
+    def portal_overview(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+    ) -> PartnerPortalOverviewResponse:
+        self._validate_range(period_start, period_end)
+        currency_code = currency.upper() if currency else None
+        usage = self.repo.list_usage(partner_id, period_start, period_end, currency_code)
+        settlements = self.repo.list_settlements(partner_id, period_start, period_end, currency_code)
+        payouts = self.repo.list_payouts(partner_id, currency=currency_code)
+        reconciliations = self.repo.list_reconciliations(partner_id, period_start, period_end)
+        domains = [item for item in self.repo.list_domains(partner_id) if item.status.value == "active"]
+        entitlements = [item for item in self.repo.list_entitlements(partner_id) if item.status.value == "active"]
+        return PartnerPortalOverviewResponse(
+            partner_id=partner_id,
+            active_entitlements=len(entitlements),
+            authorized_domains=len(domains),
+            usage_total=sum(item.quantity for item in usage),
+            gross_revenue_amount=self._sum_money(item.gross_revenue_amount for item in usage),
+            partner_share_amount=self._sum_money(item.partner_share_amount for item in settlements),
+            finalized_settlements=sum(1 for item in settlements if item.status in {SettlementStatus.FINALIZED, SettlementStatus.PAID}),
+            pending_payouts=sum(1 for item in payouts if item.status in {PartnerPayoutStatus.PENDING, PartnerPayoutStatus.APPROVED, PartnerPayoutStatus.PROCESSING}),
+            paid_payouts=sum(1 for item in payouts if item.status == PartnerPayoutStatus.PAID),
+            reconciliation_exceptions=sum(1 for item in reconciliations if item.outcome != PartnerPayoutReconciliationOutcome.MATCHED),
+            currency=currency_code,
+            recent_events=self.portal_events(partner_id, limit=6),
+        )
+
+    def portal_usage(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> PartnerPortalUsageSummaryResponse:
+        self._validate_range(period_start, period_end)
+        limit = self._limit(limit)
+        currency_code = currency.upper() if currency else None
+        all_usage = self.repo.list_usage(partner_id, period_start, period_end, currency_code)
+        rows = self.repo.list_usage(partner_id, period_start, period_end, currency_code, limit=limit, offset=max(offset, 0))
+        by_content: dict[str, dict[str, object]] = {}
+        for item in all_usage:
+            key = f"{item.content_type.value}:{item.content_id}"
+            current = by_content.setdefault(
+                key,
+                {
+                    "content_type": item.content_type.value,
+                    "content_id": item.content_id,
+                    "usage_total": 0,
+                    "gross_revenue_amount": Decimal("0.000000"),
+                    "currency": item.currency,
+                },
+            )
+            usage_total = current["usage_total"]
+            current["usage_total"] = (usage_total if isinstance(usage_total, int) else 0) + item.quantity
+            current["gross_revenue_amount"] = self._decimal_money(
+                Decimal(str(current["gross_revenue_amount"])) + Decimal(str(item.gross_revenue_amount))
+            )
+        return PartnerPortalUsageSummaryResponse(
+            partner_id=partner_id,
+            usage_total=sum(item.quantity for item in all_usage),
+            gross_revenue_amount=self._sum_money(item.gross_revenue_amount for item in all_usage),
+            currency=currency_code,
+            rows=[PartnerUsageMeterResponse.model_validate(item) for item in rows],
+            content_performance=list(by_content.values()),
+        )
+
+    def portal_revenue(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+    ) -> PartnerPortalRevenueSummaryResponse:
+        self._validate_range(period_start, period_end)
+        currency_code = currency.upper() if currency else None
+        settlements = self.repo.list_settlements(partner_id, period_start, period_end, currency_code)
+        series: dict[str, dict[str, object]] = {}
+        for item in settlements:
+            bucket = item.period_start.date().isoformat()
+            current = series.setdefault(
+                bucket,
+                {
+                    "date": bucket,
+                    "gross_revenue_amount": Decimal("0.000000"),
+                    "partner_share_amount": Decimal("0.000000"),
+                    "net_settlement_amount": Decimal("0.000000"),
+                    "currency": item.currency,
+                },
+            )
+            current["gross_revenue_amount"] = self._decimal_money(
+                Decimal(str(current["gross_revenue_amount"])) + Decimal(str(item.gross_revenue_amount))
+            )
+            current["partner_share_amount"] = self._decimal_money(
+                Decimal(str(current["partner_share_amount"])) + Decimal(str(item.partner_share_amount))
+            )
+            current["net_settlement_amount"] = self._decimal_money(
+                Decimal(str(current["net_settlement_amount"])) + Decimal(str(item.net_settlement_amount))
+            )
+        return PartnerPortalRevenueSummaryResponse(
+            partner_id=partner_id,
+            gross_revenue_amount=self._sum_money(item.gross_revenue_amount for item in settlements),
+            platform_share_amount=self._sum_money(item.platform_share_amount for item in settlements),
+            partner_share_amount=self._sum_money(item.partner_share_amount for item in settlements),
+            adjustment_amount=self._sum_money(item.adjustment_amount for item in settlements),
+            net_settlement_amount=self._sum_money(item.net_settlement_amount for item in settlements),
+            currency=currency_code,
+            time_series=sorted(series.values(), key=lambda row: str(row["date"])),
+        )
+
+    def portal_settlements(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[PartnerPortalSettlementResponse]:
+        self._validate_range(period_start, period_end)
+        currency_code = currency.upper() if currency else None
+        settlements = self.repo.list_settlements(
+            partner_id, period_start, period_end, currency_code, limit=self._limit(limit), offset=max(offset, 0)
+        )
+        payouts = {item.settlement_id: item.status for item in self.repo.list_payouts(partner_id)}
+        return [
+            PartnerPortalSettlementResponse.model_validate(item).model_copy(
+                update={"payout_status": payouts.get(item.id)}
+            )
+            for item in settlements
+        ]
+
+    def portal_payouts(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[PartnerPortalPayoutResponse]:
+        self._validate_range(period_start, period_end)
+        return [
+            self._portal_payout(item)
+            for item in self.repo.list_payouts(
+                partner_id,
+                created_after=period_start,
+                created_before=period_end,
+                currency=currency.upper() if currency else None,
+                limit=self._limit(limit),
+                offset=max(offset, 0),
+            )
+        ]
+
+    def portal_reconciliations(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[PartnerPortalReconciliationResponse]:
+        self._validate_range(period_start, period_end)
+        return [
+            self._portal_reconciliation(item)
+            for item in self.repo.list_reconciliations(
+                partner_id, period_start, period_end, limit=self._limit(limit), offset=max(offset, 0)
+            )
+        ]
+
+    def portal_statements(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[PartnerPortalStatementResponse]:
+        settlements = self.portal_settlements(partner_id, period_start, period_end, currency, limit, offset)
+        payouts = self.repo.list_payouts(partner_id)
+        reconciliations = self.repo.list_reconciliations(partner_id)
+        response: list[PartnerPortalStatementResponse] = []
+        for statement in settlements:
+            linked_payouts = [p for p in payouts if p.settlement_id == statement.id]
+            linked_reconciliations = [
+                r for r in reconciliations if r.payout_id in {p.id for p in linked_payouts}
+            ]
+            response.append(
+                PartnerPortalStatementResponse(
+                    settlement=statement,
+                    payouts=[self._portal_payout(item) for item in linked_payouts],
+                    reconciliation=[self._portal_reconciliation(item) for item in linked_reconciliations],
+                )
+            )
+        return response
+
+    def portal_statement_detail(self, partner_id: UUID, statement_id: UUID) -> PartnerPortalStatementResponse:
+        statement = self.repo.get_settlement(partner_id, statement_id)
+        if statement is None:
+            raise ValueError("Settlement statement not found")
+        settlement_resp = PartnerPortalSettlementResponse.model_validate(statement)
+        payouts = self.repo.list_payouts(partner_id)
+        linked_payouts = [p for p in payouts if p.settlement_id == statement.id]
+        if linked_payouts:
+            settlement_resp.payout_status = linked_payouts[-1].status
+        reconciliations = self.repo.list_reconciliations(partner_id)
+        linked_reconciliations = [
+            r for r in reconciliations if r.payout_id in {p.id for p in linked_payouts}
+        ]
+        return PartnerPortalStatementResponse(
+            settlement=settlement_resp,
+            payouts=[self._portal_payout(item) for item in linked_payouts],
+            reconciliation=[self._portal_reconciliation(item) for item in linked_reconciliations],
+        )
+
+    def add_portal_user(self, partner_id: UUID, user_id: int, role: str = "partner_viewer") -> PartnerPortalUser:
+        self.get_partner(partner_id)
+        portal_user = PartnerPortalUser(partner_id=partner_id, user_id=user_id, role=role)
+        return self.repo.create_portal_user(portal_user)
+
+    def list_portal_users(self, partner_id: UUID) -> list[PartnerPortalUser]:
+        self.get_partner(partner_id)
+        return self.repo.list_portal_users(partner_id)
+
+
+    def portal_events(
+        self,
+        partner_id: UUID,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> list[PartnerPortalEventResponse]:
+        self._validate_range(period_start, period_end)
+        return [
+            PartnerPortalEventResponse.model_validate(item)
+            for item in self.repo.list_portal_events(
+                partner_id, period_start, period_end, limit=self._limit(limit), offset=max(offset, 0)
+            )
+        ]
+
+    def portal_export_manifest(
+        self,
+        partner_id: UUID,
+        report_type: str,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        currency: str | None = None,
+    ) -> PartnerPortalExportManifestResponse:
+        currency_code = currency.upper() if currency else None
+        rows: list[dict[str, object]]
+        if report_type == "usage":
+            rows = [
+                {
+                    "occurred_at": item.occurred_at.isoformat(),
+                    "content_type": item.content_type.value,
+                    "content_id": item.content_id,
+                    "usage_event_type": item.usage_event_type.value,
+                    "quantity": item.quantity,
+                    "gross_revenue_amount": self._money(item.gross_revenue_amount),
+                    "currency": item.currency,
+                }
+                for item in self.repo.list_usage(partner_id, period_start, period_end, currency_code)
+            ]
+        elif report_type in {"settlements", "statements"}:
+            rows = [
+                {
+                    "statement_id": str(item.id),
+                    "period_start": item.period_start.isoformat(),
+                    "period_end": item.period_end.isoformat(),
+                    "status": item.status.value,
+                    "usage_count": item.usage_count,
+                    "gross_revenue_amount": self._money(item.gross_revenue_amount),
+                    "platform_share_amount": self._money(item.platform_share_amount),
+                    "partner_share_amount": self._money(item.partner_share_amount),
+                    "adjustment_amount": self._money(item.adjustment_amount),
+                    "net_settlement_amount": self._money(item.net_settlement_amount),
+                    "currency": item.currency,
+                }
+                for item in self.repo.list_settlements(partner_id, period_start, period_end, currency_code)
+            ]
+        elif report_type == "payouts":
+            rows = [
+                {
+                    "payout_id": str(item.id),
+                    "settlement_id": str(item.settlement_id),
+                    "status": item.status.value,
+                    "amount": self._money(item.amount),
+                    "currency": item.currency,
+                    "provider_type": item.provider_type.value,
+                    "provider_transaction_reference": item.provider_transaction_id or "",
+                    "created_at": item.created_at.isoformat(),
+                }
+                for item in self.repo.list_payouts(partner_id, currency=currency_code)
+            ]
+        else:
+            raise ValueError("Unsupported report_type")
+        return PartnerPortalExportManifestResponse(
+            generated_at=utc_now(),
+            partner_id=partner_id,
+            report_type=report_type,
+            currency=currency_code,
+            rows=rows,
+        )
+
+    def portal_export_csv(self, manifest: PartnerPortalExportManifestResponse) -> str:
+        output = StringIO()
+        fieldnames = sorted({key for row in manifest.rows for key in row})
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in manifest.rows:
+            writer.writerow({key: self._csv_safe(row.get(key, "")) for key in fieldnames})
+        return output.getvalue()
 
 
     def verify_token(self, token: str) -> dict[str, Any]:
@@ -1063,6 +1494,104 @@ class PartnerSyndicationService:
             before_json=before,
             after_json=after,
         )
+
+    def _record_portal_event(
+        self,
+        partner_id: UUID,
+        event_type: PartnerPortalEventType,
+        title: str,
+        message: str,
+        resource_type: str | None = None,
+        resource_id: UUID | None = None,
+        severity: str = "info",
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        self.repo.create_portal_event(
+            PartnerPortalEvent(
+                partner_id=partner_id,
+                event_type=event_type,
+                title=title,
+                message=message,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                severity=severity,
+                payload_json=payload,
+            )
+        )
+
+    def _portal_account(self, account: PartnerPayoutAccount) -> PartnerPortalPayoutAccountSummary:
+        return PartnerPortalPayoutAccountSummary(
+            id=account.id,
+            provider_type=account.provider_type,
+            destination_label=account.destination_label,
+            masked_destination_reference=self._mask_reference(account.destination_reference),
+            currency=account.currency,
+            status=account.status,
+            verification_status=account.verification_status,
+            created_at=account.created_at,
+            updated_at=account.updated_at,
+        )
+
+    def _portal_payout(self, payout: PartnerPayout) -> PartnerPortalPayoutResponse:
+        return PartnerPortalPayoutResponse(
+            id=payout.id,
+            settlement_id=payout.settlement_id,
+            payout_account_id=payout.payout_account_id,
+            amount=self._decimal_money(payout.amount),
+            currency=payout.currency,
+            status=payout.status,
+            provider_type=payout.provider_type,
+            provider_transaction_reference=payout.provider_transaction_id,
+            failure_code=payout.failure_code,
+            failure_reason=payout.failure_reason,
+            created_at=payout.created_at,
+            approved_at=payout.approved_at,
+            executed_at=payout.executed_at,
+            paid_at=payout.paid_at,
+            cancelled_at=payout.cancelled_at,
+            updated_at=payout.updated_at,
+        )
+
+    def _portal_reconciliation(
+        self, reconciliation: PartnerPayoutReconciliation
+    ) -> PartnerPortalReconciliationResponse:
+        return PartnerPortalReconciliationResponse(
+            id=reconciliation.id,
+            payout_id=reconciliation.payout_id,
+            provider_type=reconciliation.provider_type,
+            provider_transaction_reference=reconciliation.provider_transaction_id,
+            reported_amount=self._decimal_money(reconciliation.reported_amount),
+            reported_currency=reconciliation.reported_currency,
+            provider_status=reconciliation.provider_status,
+            outcome=reconciliation.outcome,
+            details_json=reconciliation.details_json,
+            created_at=reconciliation.created_at,
+        )
+
+    def _validate_range(self, period_start: datetime | None, period_end: datetime | None) -> None:
+        if period_start and period_end and period_start >= period_end:
+            raise ValueError("period_start must be before period_end")
+
+    def _limit(self, value: int) -> int:
+        return max(1, min(value, 250))
+
+    def _sum_money(self, values: Any) -> Decimal:
+        total = Decimal("0")
+        for value in values:
+            total += Decimal(str(value))
+        return self._decimal_money(total)
+
+    def _mask_reference(self, value: str) -> str:
+        if len(value) <= 4:
+            return "****"
+        return f"****{value[-4:]}"
+
+    def _csv_safe(self, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        if value.startswith(("=", "+", "-", "@", "\t", "\r", "\n")):
+            return f"'{value}"
+        return value
 
     def _decimal_money(self, value: Decimal) -> Decimal:
         return Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
