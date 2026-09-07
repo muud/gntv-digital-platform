@@ -132,6 +132,22 @@ class PartnerPayoutAuditAction(StrEnum):
     PAYOUT_RECONCILED = "payout_reconciled"
 
 
+class PartnerPortalEventType(StrEnum):
+    SETTLEMENT_FINALIZED = "settlement_finalized"
+    PAYOUT_APPROVED = "payout_approved"
+    PAYOUT_PROCESSING = "payout_processing"
+    PAYOUT_PAID = "payout_paid"
+    PAYOUT_FAILED = "payout_failed"
+    RECONCILIATION_EXCEPTION = "reconciliation_exception"
+
+
+class PartnerPortalUserRole(StrEnum):
+    VIEWER = "partner_viewer"
+    FINANCE = "partner_finance"
+    ADMIN = "partner_admin"
+
+
+
 class Partner(Base):
     """B2B partner organization allowed to syndicate GNTV content."""
 
@@ -182,6 +198,13 @@ class Partner(Base):
     payouts: Mapped[list[PartnerPayout]] = relationship(
         "PartnerPayout", back_populates="partner", cascade="all, delete-orphan"
     )
+    portal_events: Mapped[list[PartnerPortalEvent]] = relationship(
+        "PartnerPortalEvent", back_populates="partner", cascade="all, delete-orphan"
+    )
+    portal_users: Mapped[list[PartnerPortalUser]] = relationship(
+        "PartnerPortalUser", back_populates="partner", cascade="all, delete-orphan"
+    )
+
 
     __table_args__ = (Index("ix_partners_status_created", "status", "created_at"),)
 
@@ -593,3 +616,50 @@ class PartnerPayoutAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     __table_args__ = (Index("ix_partner_payout_audit_partner_created", "partner_id", "created_at"),)
+
+
+class PartnerPortalEvent(Base):
+    """Partner-visible financial and account status event feed."""
+
+    __tablename__ = "partner_portal_events"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    event_type: Mapped[PartnerPortalEventType] = mapped_column(
+        enum_type(PartnerPortalEventType, "partner_portal_event_type_enum"),
+        nullable=False,
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    resource_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    resource_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False, default="info")
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    visible_to_partner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="portal_events")
+
+    __table_args__ = (
+        Index("ix_partner_portal_events_partner_created", "partner_id", "created_at"),
+        Index("ix_partner_portal_events_partner_type", "partner_id", "event_type", "created_at"),
+    )
+
+
+class PartnerPortalUser(Base):
+    """User membership granting access to the partner portal."""
+
+    __tablename__ = "partner_portal_users"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(String(64), nullable=False, default=PartnerPortalUserRole.VIEWER.value)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="portal_users")
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "user_id", name="uq_partner_portal_user"),
+        Index("ix_partner_portal_users_user", "user_id"),
+    )

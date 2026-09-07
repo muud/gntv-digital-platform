@@ -11,7 +11,7 @@ from app.modules.analytics.api import router as analytics_router
 from app.modules.chat.api import router as chat_router
 from app.modules.chat.websocket import router as chat_websocket_router
 from app.modules.monetization.api import router as monetization_router
-from app.modules.partners.api import embed_router, partners_router
+from app.modules.partners.api import embed_router, partner_portal_router, partners_router
 from app.modules.cms.api import content_router
 from app.modules.cms.media.api import download_router as media_download_router
 from app.modules.cms.media.api import router as media_router
@@ -53,6 +53,7 @@ app.include_router(processing_router)
 app.include_router(distribution_router)
 app.include_router(monetization_router)
 app.include_router(partners_router)
+app.include_router(partner_portal_router)
 app.include_router(embed_router)
 app.include_router(sheeko_xariiro_router)
 app.include_router(chat_router)

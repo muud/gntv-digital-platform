@@ -1,12 +1,32 @@
 import '../../shared/src/style.css';
 import { store } from '../../shared/src/state.js';
 import { VODS, CHANNELS } from '../../shared/src/utils/mockData.js';
+import { initPartnerPortalDashboard } from './components/PartnerPortalDashboard.js';
 import { initStudioDashboard } from './components/StudioDashboard.js';
 
 const initApp = () => {
   const viewportContainer = document.querySelector('#viewport-container');
   const emergencyBanner = document.querySelector('#emergency-banner');
   const emergencyBannerText = document.querySelector('#emergency-banner-text');
+
+  if (window.location.pathname.includes('partner-portal')) {
+    store.setState('systemMode', 'partner-portal');
+    const topNavContainer = document.querySelector('.top-nav-links');
+    const authSection = document.querySelector('#header-auth-section');
+    const headerActiveChannel = document.querySelector('#header-active-channel');
+    if (topNavContainer) {
+      topNavContainer.innerHTML = '<span class="top-nav-item active">Partner Self-Service Portal</span>';
+    }
+    if (authSection) {
+      authSection.innerHTML = '<a href="/" style="color: var(--brand-primary); font-weight: 800; text-decoration: none; font-size: 12px;">Studio Login</a>';
+    }
+    if (headerActiveChannel) {
+      headerActiveChannel.textContent = 'Partner Financial Reporting';
+    }
+    viewportContainer.innerHTML = '';
+    initPartnerPortalDashboard(viewportContainer);
+    return;
+  }
 
   // Header telemetry nodes
   const headerViewerCount = document.querySelector('#header-viewer-count');

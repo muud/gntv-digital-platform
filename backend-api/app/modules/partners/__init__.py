@@ -1,6 +1,6 @@
 """Partner syndication and secure embed module."""
 
-from app.modules.partners.api import embed_router, partners_router
+from app.modules.partners.api import embed_router, partner_portal_router, partners_router
 from app.modules.partners.models import (
     Partner,
     PartnerApiCredential,
@@ -25,6 +25,10 @@ from app.modules.partners.models import (
     PartnerPayoutReconciliationOutcome,
     PartnerPayoutStatus,
     PartnerPayoutVerificationStatus,
+    PartnerPortalEvent,
+    PartnerPortalEventType,
+    PartnerPortalUser,
+    PartnerPortalUserRole,
     PartnerRevenueShareAgreement,
     PartnerSettlementStatement,
     PartnerUsageEventType,
@@ -35,6 +39,7 @@ from app.modules.partners.models import (
 )
 from app.modules.partners.repository import PartnerRepository
 from app.modules.partners.service import PartnerSecurityError, PartnerSyndicationService
+
 
 __all__ = [
     "Partner",
@@ -60,6 +65,10 @@ __all__ = [
     "PartnerPayoutReconciliationOutcome",
     "PartnerPayoutStatus",
     "PartnerPayoutVerificationStatus",
+    "PartnerPortalEvent",
+    "PartnerPortalEventType",
+    "PartnerPortalUser",
+    "PartnerPortalUserRole",
     "PartnerRepository",
     "PartnerRevenueShareAgreement",
     "PartnerSecurityError",
@@ -71,5 +80,6 @@ __all__ = [
     "RevenueShareRuleType",
     "SettlementStatus",
     "embed_router",
+    "partner_portal_router",
     "partners_router",
 ]

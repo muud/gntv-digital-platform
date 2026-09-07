@@ -19,6 +19,7 @@ from app.modules.partners.models import (
     PartnerPayoutReconciliationOutcome,
     PartnerPayoutStatus,
     PartnerPayoutVerificationStatus,
+    PartnerPortalEventType,
     PartnerStatus,
     PartnerUsageEventType,
     RevenueShareRuleType,
@@ -472,3 +473,126 @@ class PartnerPayoutAuditLogResponse(BaseModel):
     before_json: dict[str, object] | None
     after_json: dict[str, object] | None
     created_at: datetime
+
+
+class PartnerPortalPayoutAccountSummary(BaseModel):
+    id: UUID
+    provider_type: PartnerPayoutProviderType
+    destination_label: str
+    masked_destination_reference: str
+    currency: str
+    status: PartnerPayoutAccountStatus
+    verification_status: PartnerPayoutVerificationStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class PartnerPortalMeResponse(BaseModel):
+    partner: PartnerResponse
+    authorized_domains: list[PartnerDomainResponse]
+    entitlements: list[PartnerEntitlementResponse]
+    payout_accounts: list[PartnerPortalPayoutAccountSummary]
+
+
+class PartnerPortalEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    event_type: PartnerPortalEventType
+    title: str
+    message: str
+    resource_type: str | None
+    resource_id: UUID | None
+    severity: str
+    payload_json: dict[str, object] | None
+    created_at: datetime
+
+
+class PartnerPortalOverviewResponse(BaseModel):
+    partner_id: UUID
+    active_entitlements: int
+    authorized_domains: int
+    usage_total: int
+    gross_revenue_amount: Decimal
+    partner_share_amount: Decimal
+    finalized_settlements: int
+    pending_payouts: int
+    paid_payouts: int
+    reconciliation_exceptions: int
+    currency: str | None
+    recent_events: list[PartnerPortalEventResponse]
+
+
+class PartnerPortalUsageSummaryResponse(BaseModel):
+    partner_id: UUID
+    usage_total: int
+    gross_revenue_amount: Decimal
+    currency: str | None
+    rows: list[PartnerUsageMeterResponse]
+    content_performance: list[dict[str, object]]
+
+
+class PartnerPortalRevenueSummaryResponse(BaseModel):
+    partner_id: UUID
+    gross_revenue_amount: Decimal
+    platform_share_amount: Decimal
+    partner_share_amount: Decimal
+    adjustment_amount: Decimal
+    net_settlement_amount: Decimal
+    currency: str | None
+    time_series: list[dict[str, object]]
+
+
+class PartnerPortalSettlementResponse(PartnerSettlementStatementResponse):
+    payout_status: PartnerPayoutStatus | None = None
+
+
+class PartnerPortalPayoutResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    settlement_id: UUID
+    payout_account_id: UUID
+    amount: Decimal
+    currency: str
+    status: PartnerPayoutStatus
+    provider_type: PartnerPayoutProviderType
+    provider_transaction_reference: str | None
+    failure_code: str | None
+    failure_reason: str | None
+    created_at: datetime
+    approved_at: datetime | None
+    executed_at: datetime | None
+    paid_at: datetime | None
+    cancelled_at: datetime | None
+    updated_at: datetime
+
+
+class PartnerPortalReconciliationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    payout_id: UUID | None
+    provider_type: PartnerPayoutProviderType
+    provider_transaction_reference: str
+    reported_amount: Decimal
+    reported_currency: str
+    provider_status: str
+    outcome: PartnerPayoutReconciliationOutcome
+    details_json: dict[str, object] | None
+    created_at: datetime
+
+
+class PartnerPortalStatementResponse(BaseModel):
+    settlement: PartnerPortalSettlementResponse
+    payouts: list[PartnerPortalPayoutResponse]
+    reconciliation: list[PartnerPortalReconciliationResponse]
+
+
+class PartnerPortalExportManifestResponse(BaseModel):
+    generated_at: datetime
+    partner_id: UUID
+    report_type: str
+    currency: str | None
+    rows: list[dict[str, object]]
