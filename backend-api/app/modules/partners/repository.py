@@ -20,6 +20,12 @@ from app.modules.partners.models import (
     PartnerEntitlement,
     PartnerEntitlementStatus,
     PartnerFinancialAuditLog,
+    PartnerInvitation,
+    PartnerInvitationStatus,
+    PartnerLifecycleAuditLog,
+    PartnerOnboardingChecklistItem,
+    PartnerOnboardingChecklistKey,
+    PartnerOnboardingProfile,
     PartnerPayout,
     PartnerPayoutAccount,
     PartnerPayoutAuditLog,
@@ -55,6 +61,12 @@ class PartnerRepository:
         self.db.add(credential)
         self.db.commit()
         return self.get_partner(partner.id) or partner
+
+    def update_partner(self, partner: Partner) -> Partner:
+        self.db.add(partner)
+        self.db.commit()
+        self.db.refresh(partner)
+        return partner
 
     def list_partners(self) -> list[Partner]:
         return (
@@ -580,3 +592,96 @@ class PartnerRepository:
 
     def list_portal_users(self, partner_id: UUID) -> list[PartnerPortalUser]:
         return self.db.query(PartnerPortalUser).filter(PartnerPortalUser.partner_id == partner_id).all()
+
+    def get_onboarding_profile(self, partner_id: UUID) -> PartnerOnboardingProfile | None:
+        return (
+            self.db.query(PartnerOnboardingProfile)
+            .filter(PartnerOnboardingProfile.partner_id == partner_id)
+            .one_or_none()
+        )
+
+    def upsert_onboarding_profile(self, profile: PartnerOnboardingProfile) -> PartnerOnboardingProfile:
+        self.db.add(profile)
+        self.db.commit()
+        self.db.refresh(profile)
+        return profile
+
+    def get_checklist_item(
+        self, partner_id: UUID, item_key: PartnerOnboardingChecklistKey
+    ) -> PartnerOnboardingChecklistItem | None:
+        return (
+            self.db.query(PartnerOnboardingChecklistItem)
+            .filter(
+                PartnerOnboardingChecklistItem.partner_id == partner_id,
+                PartnerOnboardingChecklistItem.item_key == item_key,
+            )
+            .one_or_none()
+        )
+
+    def upsert_checklist_item(self, item: PartnerOnboardingChecklistItem) -> PartnerOnboardingChecklistItem:
+        self.db.add(item)
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def list_checklist_items(self, partner_id: UUID) -> list[PartnerOnboardingChecklistItem]:
+        return (
+            self.db.query(PartnerOnboardingChecklistItem)
+            .filter(PartnerOnboardingChecklistItem.partner_id == partner_id)
+            .order_by(PartnerOnboardingChecklistItem.created_at.asc())
+            .all()
+        )
+
+    def create_invitation(self, invitation: PartnerInvitation, audit: PartnerLifecycleAuditLog) -> PartnerInvitation:
+        self.db.add(invitation)
+        self.db.flush()
+        audit.partner_id = invitation.partner_id
+        audit.invitation_id = invitation.id
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(invitation)
+        return invitation
+
+    def get_invitation_by_token_hash(self, token_hash: str) -> PartnerInvitation | None:
+        return self.db.query(PartnerInvitation).filter(PartnerInvitation.token_hash == token_hash).one_or_none()
+
+    def list_invitations(self, partner_id: UUID) -> list[PartnerInvitation]:
+        return (
+            self.db.query(PartnerInvitation)
+            .filter(PartnerInvitation.partner_id == partner_id)
+            .order_by(PartnerInvitation.created_at.desc())
+            .all()
+        )
+
+    def update_invitation(self, invitation: PartnerInvitation, audit: PartnerLifecycleAuditLog) -> PartnerInvitation:
+        self.db.add(invitation)
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(invitation)
+        return invitation
+
+    def expire_invitations(self, now: datetime | None = None) -> None:
+        observed_at = now or utc_now()
+        (
+            self.db.query(PartnerInvitation)
+            .filter(
+                PartnerInvitation.status == PartnerInvitationStatus.PENDING,
+                PartnerInvitation.expires_at <= observed_at,
+            )
+            .update({PartnerInvitation.status: PartnerInvitationStatus.EXPIRED}, synchronize_session=False)
+        )
+        self.db.commit()
+
+    def create_lifecycle_audit(self, audit: PartnerLifecycleAuditLog) -> PartnerLifecycleAuditLog:
+        self.db.add(audit)
+        self.db.commit()
+        self.db.refresh(audit)
+        return audit
+
+    def list_lifecycle_audits(self, partner_id: UUID) -> list[PartnerLifecycleAuditLog]:
+        return (
+            self.db.query(PartnerLifecycleAuditLog)
+            .filter(PartnerLifecycleAuditLog.partner_id == partner_id)
+            .order_by(PartnerLifecycleAuditLog.created_at.desc())
+            .all()
+        )

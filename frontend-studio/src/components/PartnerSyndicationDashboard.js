@@ -7,7 +7,7 @@ export function initPartnerSyndicationDashboard(container) {
   let active = true;
   let isRefreshing = false;
   let fetchError = "";
-  let activeSubSection = "billing"; // "billing" | "payouts" | "syndication"
+  let activeSubSection = "lifecycle"; // "lifecycle" | "billing" | "payouts" | "syndication"
   let partners = [];
   let analytics = null;
   let selectedPartnerId = "";
@@ -22,6 +22,7 @@ export function initPartnerSyndicationDashboard(container) {
   let payouts = [];
   let reconciliations = [];
   let payoutAudits = [];
+  let lifecycle = null;
 
   const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -79,10 +80,11 @@ export function initPartnerSyndicationDashboard(container) {
       payouts = [];
       reconciliations = [];
       payoutAudits = [];
+      lifecycle = null;
       return;
     }
     try {
-      const [domainList, entitlementList, agreementList, settlementList, usageList, auditList, accountList, payoutList, reconList, pAuditList] =
+      const [domainList, entitlementList, agreementList, settlementList, usageList, auditList, accountList, payoutList, reconList, pAuditList, lifecycleState] =
         await Promise.all([
           api(`/api/v1/partners/${selectedPartnerId}/domains`).catch(() => []),
           api(`/api/v1/partners/${selectedPartnerId}/entitlements`).catch(() => []),
@@ -93,7 +95,8 @@ export function initPartnerSyndicationDashboard(container) {
           api(`/api/v1/partners/${selectedPartnerId}/payout-accounts`).catch(() => []),
           api(`/api/v1/partners/${selectedPartnerId}/payouts`).catch(() => []),
           api(`/api/v1/partners/${selectedPartnerId}/reconciliation`).catch(() => []),
-          api(`/api/v1/partners/${selectedPartnerId}/payouts-audit`).catch(() => [])
+          api(`/api/v1/partners/${selectedPartnerId}/payouts-audit`).catch(() => []),
+          api(`/api/v1/partners/${selectedPartnerId}/lifecycle`).catch(() => null)
         ]);
       domains = domainList;
       entitlements = entitlementList;
@@ -105,6 +108,7 @@ export function initPartnerSyndicationDashboard(container) {
       payouts = payoutList;
       reconciliations = reconList;
       payoutAudits = pAuditList;
+      lifecycle = lifecycleState;
     } catch (error) {
       fetchError = error.message || "Failed to load partner details";
     }
@@ -122,6 +126,78 @@ export function initPartnerSyndicationDashboard(container) {
   function formatMoney(value, currency = "USD") {
     if (value === null || value === undefined) return "—";
     return `${currency} ${Number(value).toFixed(2)}`;
+  }
+
+  function lifecycleSection() {
+    if (!lifecycle) {
+      return `<div class="partner-card partner-empty">Lifecycle data is not available for this partner yet.</div>`;
+    }
+    const profile = lifecycle.profile || {};
+    const checklist = lifecycle.checklist || [];
+    const audits = lifecycle.audit || [];
+    return `
+      <div class="partner-card">
+        <h3 class="partner-section-title">Partner Lifecycle Control</h3>
+        <div class="partner-grid">
+          <div class="partner-card"><div class="partner-kpi-label">Lifecycle State</div><div class="partner-kpi-value">${lifecycle.partner.lifecycle_status}</div></div>
+          <div class="partner-card"><div class="partner-kpi-label">Checklist</div><div class="partner-kpi-value">${lifecycle.checklist_complete_count}/${lifecycle.checklist_total_count}</div></div>
+          <div class="partner-card"><div class="partner-kpi-label">Can Approve</div><div class="partner-kpi-value">${lifecycle.can_approve ? "Yes" : "No"}</div></div>
+          <div class="partner-card"><div class="partner-kpi-label">Can Activate</div><div class="partner-kpi-value">${lifecycle.can_activate ? "Yes" : "No"}</div></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+          <button class="partner-btn secondary btn-life-return" type="button">Request Changes</button>
+          <button class="partner-btn btn-life-approve" type="button">Approve</button>
+          <button class="partner-btn btn-life-activate" type="button">Activate</button>
+          <button class="partner-btn secondary btn-life-reactivate" type="button">Reactivate</button>
+          <button class="partner-btn danger btn-life-suspend" type="button">Suspend</button>
+          <button class="partner-btn danger btn-life-terminate" type="button">Terminate</button>
+        </div>
+        <form class="partner-form" id="operator-onboarding-form">
+          <h4 style="margin:0;color:#fff;font-size:13px">Operator Review Fields</h4>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px">
+            <label>Approved Domains <input name="approved_domains" placeholder="player.partner.test, *.partner.org" value="${(profile.approved_domains_json || []).join(", ")}"></label>
+            <label>Payout Readiness
+              <select name="payout_readiness_status">
+                ${["not_started","configured","verified","blocked"].map((value) => `<option value="${value}" ${profile.payout_readiness_status === value ? "selected" : ""}>${value}</option>`).join("")}
+              </select>
+            </label>
+            <label>Review Notes <input name="review_notes" placeholder="Notes visible in lifecycle review" value="${profile.review_notes || ""}"></label>
+          </div>
+          <button class="partner-btn secondary" type="submit">Save Review Fields</button>
+        </form>
+      </div>
+      <div class="partner-card">
+        <h3 class="partner-section-title">Onboarding Checklist</h3>
+        ${checklist.length ? `
+          <table class="partner-table">
+            <thead><tr><th>Item</th><th>Status</th><th>Derived From</th></tr></thead>
+            <tbody>${checklist.map((item) => `
+              <tr>
+                <td>${item.title}</td>
+                <td><span class="partner-pill ${item.is_complete ? "success" : "warning"}">${item.is_complete ? "Complete" : "Open"}</span></td>
+                <td>${item.derived_from || "manual"}</td>
+              </tr>
+            `).join("")}</tbody>
+          </table>
+        ` : `<div class="partner-empty">No lifecycle checklist exists yet.</div>`}
+      </div>
+      <div class="partner-card">
+        <h3 class="partner-section-title">Lifecycle Audit</h3>
+        ${audits.length ? `
+          <table class="partner-table">
+            <thead><tr><th>Action</th><th>Actor</th><th>Date</th><th>Metadata</th></tr></thead>
+            <tbody>${audits.slice(0, 12).map((audit) => `
+              <tr>
+                <td><span class="partner-pill">${audit.action}</span></td>
+                <td>User #${audit.actor_user_id || "System"}</td>
+                <td>${new Date(audit.created_at).toLocaleString()}</td>
+                <td><code style="font-size:11px;color:#bae6fd">${JSON.stringify(audit.metadata_json || audit.after_json || {})}</code></td>
+              </tr>
+            `).join("")}</tbody>
+          </table>
+        ` : `<div class="partner-empty">No lifecycle audit events yet.</div>`}
+      </div>
+    `;
   }
 
   function render() {
@@ -226,8 +302,10 @@ export function initPartnerSyndicationDashboard(container) {
                     <span class="partner-pill">Slug: ${partner.slug}</span>
                     <span class="partner-pill">Rate limit: ${partner.rate_limit_per_minute}/min</span>
                     <span class="partner-pill ${partner.status === 'active' ? 'success' : 'warning'}">${partner.status}</span>
+                    <span class="partner-pill info">Lifecycle: ${partner.lifecycle_status || lifecycle?.partner?.lifecycle_status || 'unknown'}</span>
                   </div>
                   <div class="partner-nav">
+                    <button class="partner-nav-btn ${activeSubSection === 'lifecycle' ? 'active' : ''}" id="tab-lifecycle">Lifecycle</button>
                     <button class="partner-nav-btn ${activeSubSection === 'billing' ? 'active' : ''}" id="tab-billing">Billing & Settlement</button>
                     <button class="partner-nav-btn ${activeSubSection === 'payouts' ? 'active' : ''}" id="tab-payouts">Payouts & Reconciliation</button>
                     <button class="partner-nav-btn ${activeSubSection === 'syndication' ? 'active' : ''}" id="tab-syndication">Syndication & Embeds</button>
@@ -235,7 +313,7 @@ export function initPartnerSyndicationDashboard(container) {
                 </div>
               </div>
 
-              ${activeSubSection === 'billing' ? `
+              ${activeSubSection === 'lifecycle' ? lifecycleSection() : activeSubSection === 'billing' ? `
                 <!-- Billing & Settlement Section -->
                 <div class="partner-card">
                   <h3 class="partner-section-title">Revenue Share Agreements</h3>
@@ -539,6 +617,10 @@ export function initPartnerSyndicationDashboard(container) {
 
   function bindEvents() {
     container.querySelector("#partner-refresh")?.addEventListener("click", refresh);
+    container.querySelector("#tab-lifecycle")?.addEventListener("click", () => {
+      activeSubSection = "lifecycle";
+      render();
+    });
     container.querySelector("#tab-billing")?.addEventListener("click", () => {
       activeSubSection = "billing";
       render();
@@ -594,6 +676,68 @@ export function initPartnerSyndicationDashboard(container) {
       } catch (error) {
         fetchError = error.message;
         render();
+      }
+    });
+
+    container.querySelector("#operator-onboarding-form")?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(event.target));
+      const approvedDomains = String(data.approved_domains || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      try {
+        await api(`/api/v1/partners/${selectedPartnerId}/lifecycle/onboarding`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            approved_domains: approvedDomains,
+            payout_readiness_status: data.payout_readiness_status,
+            review_notes: data.review_notes || null
+          })
+        });
+        await refreshPartnerDetails();
+        render();
+      } catch (error) {
+        fetchError = error.message;
+        render();
+      }
+    });
+
+    async function lifecycleAction(action, payload = null) {
+      try {
+        await api(`/api/v1/partners/${selectedPartnerId}/lifecycle/${action}`, {
+          method: "POST",
+          body: payload ? JSON.stringify(payload) : undefined
+        });
+        await refreshPartnerDetails();
+        render();
+      } catch (error) {
+        fetchError = error.message;
+        render();
+      }
+    }
+
+    container.querySelector(".btn-life-return")?.addEventListener("click", () => {
+      const review_notes = window.prompt("What changes should the partner make?") || "Operator requested changes";
+      lifecycleAction("return", { review_notes });
+    });
+    container.querySelector(".btn-life-approve")?.addEventListener("click", () => {
+      lifecycleAction("approve", { review_notes: "Approved by operator" });
+    });
+    container.querySelector(".btn-life-activate")?.addEventListener("click", () => {
+      lifecycleAction("activate");
+    });
+    container.querySelector(".btn-life-reactivate")?.addEventListener("click", () => {
+      lifecycleAction("reactivate");
+    });
+    container.querySelector(".btn-life-suspend")?.addEventListener("click", () => {
+      if (window.confirm("Suspend this partner and revoke operational embed/API access?")) {
+        lifecycleAction("suspend", { reason: "Operator suspension" });
+      }
+    });
+    container.querySelector(".btn-life-terminate")?.addEventListener("click", () => {
+      if (window.confirm("Terminate this partner and revoke active access while preserving history?")) {
+        lifecycleAction("terminate", { reason: "Operator termination" });
       }
     });
 

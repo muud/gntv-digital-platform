@@ -13,8 +13,14 @@ from app.modules.partners.models import (
     PartnerEmbedEventType,
     PartnerEntitlementStatus,
     PartnerFinancialAuditAction,
+    PartnerInvitationStatus,
+    PartnerLifecycleAuditAction,
+    PartnerLifecycleStatus,
+    PartnerOnboardingChecklistKey,
+    PartnerOrganizationType,
     PartnerPayoutAccountStatus,
     PartnerPayoutAuditAction,
+    PartnerPayoutReadinessStatus,
     PartnerPayoutProviderType,
     PartnerPayoutReconciliationOutcome,
     PartnerPayoutStatus,
@@ -60,6 +66,8 @@ class PartnerResponse(BaseModel):
     name: str
     slug: str
     status: PartnerStatus
+    lifecycle_status: PartnerLifecycleStatus
+    lifecycle_updated_at: datetime | None
     contact_email: str | None
     rate_limit_per_minute: int
     audit_metadata_json: dict[str, object] | None
@@ -596,3 +604,171 @@ class PartnerPortalExportManifestResponse(BaseModel):
     report_type: str
     currency: str | None
     rows: list[dict[str, object]]
+
+
+class PartnerContactInfo(BaseModel):
+    name: str = Field(..., min_length=2, max_length=160)
+    email: str = Field(..., min_length=5, max_length=255)
+    phone: str | None = Field(None, max_length=80)
+    title: str | None = Field(None, max_length=120)
+
+
+class PartnerOnboardingProfileUpdate(BaseModel):
+    legal_organization_name: str | None = Field(None, min_length=2, max_length=240)
+    display_name: str | None = Field(None, min_length=2, max_length=160)
+    organization_type: PartnerOrganizationType | None = None
+    country: str | None = Field(None, min_length=2, max_length=2)
+    primary_business_contact: PartnerContactInfo | None = None
+    finance_contact: PartnerContactInfo | None = None
+    technical_contact: PartnerContactInfo | None = None
+    requested_domains: list[str] | None = None
+    requested_capabilities: list[str] | None = None
+    requested_api_embed_access: bool | None = None
+    settlement_currency: str | None = Field(None, min_length=3, max_length=3)
+
+    @field_validator("requested_domains")
+    @classmethod
+    def validate_requested_domains(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = sorted({item.strip().lower() for item in value if item.strip()})
+        if any("://" in item or "/" in item for item in cleaned):
+            raise ValueError("requested_domains must contain hostnames, not URLs")
+        if len(cleaned) > 50:
+            raise ValueError("requested_domains cannot exceed 50 entries")
+        return cleaned
+
+    @field_validator("requested_capabilities")
+    @classmethod
+    def validate_capabilities(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        allowed = {"vod_embed", "live_embed", "podcast_embed", "api_reporting", "fast_channel"}
+        cleaned = sorted({item.strip().lower() for item in value if item.strip()})
+        unsupported = [item for item in cleaned if item not in allowed]
+        if unsupported:
+            raise ValueError(f"Unsupported requested capabilities: {', '.join(unsupported)}")
+        return cleaned
+
+
+class PartnerOperatorOnboardingUpdate(PartnerOnboardingProfileUpdate):
+    approved_domains: list[str] | None = None
+    payout_readiness_status: PartnerPayoutReadinessStatus | None = None
+    review_notes: str | None = Field(None, max_length=1000)
+
+    @field_validator("approved_domains")
+    @classmethod
+    def validate_approved_domains(cls, value: list[str] | None) -> list[str] | None:
+        return PartnerOnboardingProfileUpdate.validate_requested_domains(value)
+
+
+class PartnerOnboardingProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    legal_organization_name: str | None
+    display_name: str | None
+    organization_type: PartnerOrganizationType | None
+    country: str | None
+    primary_business_contact_json: dict[str, object] | None
+    finance_contact_json: dict[str, object] | None
+    technical_contact_json: dict[str, object] | None
+    approved_domains_json: list[str]
+    requested_domains_json: list[str]
+    requested_capabilities_json: list[str]
+    requested_api_embed_access: bool
+    settlement_currency: str | None
+    payout_readiness_status: PartnerPayoutReadinessStatus
+    submitted_at: datetime | None
+    reviewed_at: datetime | None
+    reviewed_by_user_id: int | None
+    review_notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PartnerOnboardingChecklistItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    item_key: PartnerOnboardingChecklistKey
+    title: str
+    is_complete: bool
+    derived_from: str | None
+    completed_at: datetime | None
+    completed_by_user_id: int | None
+    metadata_json: dict[str, object] | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PartnerLifecycleAuditResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    partner_id: UUID
+    action: PartnerLifecycleAuditAction
+    actor_user_id: int | None
+    invitation_id: UUID | None
+    before_json: dict[str, object] | None
+    after_json: dict[str, object] | None
+    metadata_json: dict[str, object] | None
+    created_at: datetime
+
+
+class PartnerInvitationCreate(BaseModel):
+    target_email: str = Field(..., min_length=5, max_length=255)
+    expires_at: datetime | None = None
+
+
+class PartnerInvitationPartnerCreateRequest(BaseModel):
+    partner: PartnerCreate
+    invitation: PartnerInvitationCreate
+
+
+class PartnerInvitationAccept(BaseModel):
+    token: str = Field(..., min_length=24, max_length=240)
+    user_id: int | None = Field(None, ge=1)
+
+
+class PartnerInvitationResponse(BaseModel):
+    id: UUID
+    partner_id: UUID
+    target_email: str
+    status: PartnerInvitationStatus
+    expires_at: datetime
+    accepted_at: datetime | None
+    revoked_at: datetime | None
+    created_by_user_id: int | None
+    accepted_by_user_id: int | None
+    created_at: datetime
+    invitation_reference: str | None = None
+
+
+class PartnerLifecycleActionRequest(BaseModel):
+    reason: str | None = Field(None, max_length=1000)
+
+
+class PartnerOnboardingReviewRequest(BaseModel):
+    review_notes: str | None = Field(None, max_length=1000)
+
+
+class PartnerOnboardingStatusResponse(BaseModel):
+    partner: PartnerResponse
+    profile: PartnerOnboardingProfileResponse | None
+    checklist: list[PartnerOnboardingChecklistItemResponse]
+    checklist_complete_count: int
+    checklist_total_count: int
+    can_submit: bool
+    can_approve: bool
+    can_activate: bool
+    audit: list[PartnerLifecycleAuditResponse] = []
+
+
+class PartnerLifecycleResponse(BaseModel):
+    partner: PartnerResponse
+    profile: PartnerOnboardingProfileResponse | None
+    checklist: list[PartnerOnboardingChecklistItemResponse]
+    audit_event: PartnerLifecycleAuditResponse | None = None

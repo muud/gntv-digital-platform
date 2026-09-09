@@ -28,6 +28,68 @@ class PartnerStatus(StrEnum):
     PENDING = "pending"
 
 
+class PartnerLifecycleStatus(StrEnum):
+    PROSPECT = "prospect"
+    INVITED = "invited"
+    ONBOARDING = "onboarding"
+    PENDING_REVIEW = "pending_review"
+    APPROVED = "approved"
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    TERMINATED = "terminated"
+
+
+class PartnerOrganizationType(StrEnum):
+    BROADCASTER = "broadcaster"
+    MEDIA_NETWORK = "media_network"
+    COMMUNITY_ORGANIZATION = "community_organization"
+    EDUCATION = "education"
+    BUSINESS = "business"
+    OTHER = "other"
+
+
+class PartnerPayoutReadinessStatus(StrEnum):
+    NOT_STARTED = "not_started"
+    CONFIGURED = "configured"
+    VERIFIED = "verified"
+    BLOCKED = "blocked"
+
+
+class PartnerOnboardingChecklistKey(StrEnum):
+    ORGANIZATION_PROFILE_COMPLETE = "organization_profile_complete"
+    BUSINESS_CONTACT_VERIFIED = "business_contact_verified"
+    TECHNICAL_CONTACT_VERIFIED = "technical_contact_verified"
+    DOMAINS_REVIEWED = "domains_reviewed"
+    SYNDICATION_ENTITLEMENTS_APPROVED = "syndication_entitlements_approved"
+    API_EMBED_ACCESS_APPROVED = "api_embed_access_approved"
+    REVENUE_SHARE_AGREEMENT_CONFIGURED = "revenue_share_agreement_configured"
+    PAYOUT_ACCOUNT_CONFIGURED = "payout_account_configured"
+    PAYOUT_ACCOUNT_VERIFIED = "payout_account_verified"
+    PORTAL_ACCESS_PROVISIONED = "portal_access_provisioned"
+
+
+class PartnerInvitationStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+
+
+class PartnerLifecycleAuditAction(StrEnum):
+    INVITATION_CREATED = "invitation_created"
+    INVITATION_ACCEPTED = "invitation_accepted"
+    ONBOARDING_SUBMITTED = "onboarding_submitted"
+    ONBOARDING_RETURNED = "onboarding_returned"
+    PARTNER_APPROVED = "partner_approved"
+    PARTNER_ACTIVATED = "partner_activated"
+    PARTNER_SUSPENDED = "partner_suspended"
+    PARTNER_REACTIVATED = "partner_reactivated"
+    PARTNER_TERMINATED = "partner_terminated"
+    ACCESS_PROVISIONED = "access_provisioned"
+    ACCESS_REVOKED = "access_revoked"
+    PROFILE_UPDATED = "profile_updated"
+
+
 class PartnerDomainStatus(StrEnum):
     ACTIVE = "active"
     DISABLED = "disabled"
@@ -139,6 +201,13 @@ class PartnerPortalEventType(StrEnum):
     PAYOUT_PAID = "payout_paid"
     PAYOUT_FAILED = "payout_failed"
     RECONCILIATION_EXCEPTION = "reconciliation_exception"
+    ONBOARDING_SUBMITTED = "onboarding_submitted"
+    ONBOARDING_RETURNED = "onboarding_returned"
+    PARTNER_APPROVED = "partner_approved"
+    PARTNER_ACTIVATED = "partner_activated"
+    PARTNER_SUSPENDED = "partner_suspended"
+    PARTNER_REACTIVATED = "partner_reactivated"
+    PARTNER_TERMINATED = "partner_terminated"
 
 
 class PartnerPortalUserRole(StrEnum):
@@ -161,6 +230,12 @@ class Partner(Base):
         nullable=False,
         default=PartnerStatus.PENDING,
     )
+    lifecycle_status: Mapped[PartnerLifecycleStatus] = mapped_column(
+        enum_type(PartnerLifecycleStatus, "partner_lifecycle_status_enum"),
+        nullable=False,
+        default=PartnerLifecycleStatus.PROSPECT,
+    )
+    lifecycle_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     audit_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -204,7 +279,18 @@ class Partner(Base):
     portal_users: Mapped[list[PartnerPortalUser]] = relationship(
         "PartnerPortalUser", back_populates="partner", cascade="all, delete-orphan"
     )
-
+    onboarding_profile: Mapped[PartnerOnboardingProfile | None] = relationship(
+        "PartnerOnboardingProfile", back_populates="partner", cascade="all, delete-orphan", uselist=False
+    )
+    onboarding_checklist: Mapped[list[PartnerOnboardingChecklistItem]] = relationship(
+        "PartnerOnboardingChecklistItem", back_populates="partner", cascade="all, delete-orphan"
+    )
+    invitations: Mapped[list[PartnerInvitation]] = relationship(
+        "PartnerInvitation", back_populates="partner", cascade="all, delete-orphan"
+    )
+    lifecycle_audits: Mapped[list[PartnerLifecycleAuditLog]] = relationship(
+        "PartnerLifecycleAuditLog", back_populates="partner", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_partners_status_created", "status", "created_at"),)
 
@@ -616,6 +702,126 @@ class PartnerPayoutAuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     __table_args__ = (Index("ix_partner_payout_audit_partner_created", "partner_id", "created_at"),)
+
+
+class PartnerOnboardingProfile(Base):
+    """Partner-supplied onboarding profile, separate from operator-only decisions."""
+
+    __tablename__ = "partner_onboarding_profiles"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    legal_organization_name: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    organization_type: Mapped[PartnerOrganizationType | None] = mapped_column(
+        enum_type(PartnerOrganizationType, "partner_organization_type_enum"),
+        nullable=True,
+    )
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    primary_business_contact_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    finance_contact_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    technical_contact_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    approved_domains_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    requested_domains_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    requested_capabilities_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    requested_api_embed_access: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    settlement_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    payout_readiness_status: Mapped[PartnerPayoutReadinessStatus] = mapped_column(
+        enum_type(PartnerPayoutReadinessStatus, "partner_payout_readiness_status_enum"),
+        nullable=False,
+        default=PartnerPayoutReadinessStatus.NOT_STARTED,
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="onboarding_profile")
+
+    __table_args__ = (Index("ix_partner_onboarding_profiles_partner", "partner_id"),)
+
+
+class PartnerOnboardingChecklistItem(Base):
+    """Persisted checklist state, with completion derived by service where possible."""
+
+    __tablename__ = "partner_onboarding_checklist_items"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    item_key: Mapped[PartnerOnboardingChecklistKey] = mapped_column(
+        enum_type(PartnerOnboardingChecklistKey, "partner_onboarding_checklist_key_enum"),
+        nullable=False,
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    is_complete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    derived_from: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="onboarding_checklist")
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "item_key", name="uq_partner_onboarding_checklist_item"),
+        Index("ix_partner_onboarding_checklist_partner_complete", "partner_id", "is_complete"),
+    )
+
+
+class PartnerInvitation(Base):
+    """Hashed partner invitation token metadata."""
+
+    __tablename__ = "partner_invitations"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    target_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    status: Mapped[PartnerInvitationStatus] = mapped_column(
+        enum_type(PartnerInvitationStatus, "partner_invitation_status_enum"),
+        nullable=False,
+        default=PartnerInvitationStatus.PENDING,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="invitations")
+
+    __table_args__ = (Index("ix_partner_invitations_partner_status", "partner_id", "status", "expires_at"),)
+
+
+class PartnerLifecycleAuditLog(Base):
+    """Append-only audit trail for partner lifecycle and access provisioning."""
+
+    __tablename__ = "partner_lifecycle_audit_logs"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("partners.id", ondelete="CASCADE"), nullable=False)
+    action: Mapped[PartnerLifecycleAuditAction] = mapped_column(
+        enum_type(PartnerLifecycleAuditAction, "partner_lifecycle_audit_action_enum"),
+        nullable=False,
+    )
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    invitation_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("partner_invitations.id", ondelete="SET NULL"), nullable=True
+    )
+    before_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    after_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    partner: Mapped[Partner] = relationship("Partner", back_populates="lifecycle_audits")
+
+    __table_args__ = (Index("ix_partner_lifecycle_audit_partner_created", "partner_id", "created_at"),)
 
 
 class PartnerPortalEvent(Base):

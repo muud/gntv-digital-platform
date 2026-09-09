@@ -24,16 +24,27 @@ from app.modules.partners.models import (
     PartnerContentType,
     PartnerCredentialStatus,
     PartnerDomain,
+    PartnerDomainStatus,
     PartnerEmbedEvent,
     PartnerEmbedEventType,
     PartnerEntitlement,
+    PartnerEntitlementStatus,
     PartnerFinancialAuditAction,
     PartnerFinancialAuditLog,
+    PartnerInvitation,
+    PartnerInvitationStatus,
+    PartnerLifecycleAuditAction,
+    PartnerLifecycleAuditLog,
+    PartnerLifecycleStatus,
+    PartnerOnboardingChecklistItem,
+    PartnerOnboardingChecklistKey,
+    PartnerOnboardingProfile,
     PartnerPayout,
     PartnerPayoutAccount,
     PartnerPayoutAccountStatus,
     PartnerPayoutAuditAction,
     PartnerPayoutAuditLog,
+    PartnerPayoutReadinessStatus,
     PartnerPayoutReconciliation,
     PartnerPayoutReconciliationOutcome,
     PartnerPayoutStatus,
@@ -41,6 +52,7 @@ from app.modules.partners.models import (
     PartnerPortalEvent,
     PartnerPortalEventType,
     PartnerPortalUser,
+    PartnerPortalUserRole,
     PartnerRevenueShareAgreement,
 
     PartnerSettlementStatement,
@@ -59,6 +71,7 @@ from app.modules.partners.schemas import (
     PartnerAnalyticsOverview,
     PartnerBrandingInput,
     PartnerBrandingResponse,
+    PartnerContactInfo,
     PartnerCreate,
     PartnerCreateResponse,
     PartnerCredentialResponse,
@@ -86,6 +99,17 @@ from app.modules.partners.schemas import (
     PartnerPortalSettlementResponse,
     PartnerPortalStatementResponse,
     PartnerPortalUsageSummaryResponse,
+    PartnerInvitationAccept,
+    PartnerInvitationCreate,
+    PartnerInvitationResponse,
+    PartnerLifecycleActionRequest,
+    PartnerLifecycleAuditResponse,
+    PartnerOnboardingChecklistItemResponse,
+    PartnerOnboardingProfileResponse,
+    PartnerOnboardingProfileUpdate,
+    PartnerOnboardingReviewRequest,
+    PartnerOnboardingStatusResponse,
+    PartnerOperatorOnboardingUpdate,
     PartnerReconciliationCreate,
     PartnerReconciliationResponse,
     PartnerRevenueShareAgreementCreate,
@@ -158,6 +182,14 @@ class PartnerSyndicationService:
             name=payload.name,
             slug=payload.slug,
             status=payload.status,
+            lifecycle_status=(
+                PartnerLifecycleStatus.ACTIVE
+                if payload.status == PartnerStatus.ACTIVE
+                else PartnerLifecycleStatus.SUSPENDED
+                if payload.status == PartnerStatus.SUSPENDED
+                else PartnerLifecycleStatus.PROSPECT
+            ),
+            lifecycle_updated_at=utc_now(),
             contact_email=payload.contact_email,
             rate_limit_per_minute=payload.rate_limit_per_minute,
             audit_metadata_json=payload.audit_metadata_json,
@@ -173,6 +205,376 @@ class PartnerSyndicationService:
                 created_at=credential.created_at,
             ),
         )
+
+    def create_partner_invitation(
+        self, payload: PartnerCreate, invitation: PartnerInvitationCreate, actor_user_id: int | None
+    ) -> tuple[PartnerCreateResponse, PartnerInvitationResponse, str]:
+        created = self.create_partner(
+            payload.model_copy(update={"status": PartnerStatus.PENDING}),
+            created_by_user_id=actor_user_id,
+        )
+        partner = self.get_partner(created.partner.id)
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.INVITED,
+            PartnerLifecycleAuditAction.INVITATION_CREATED,
+            actor_user_id,
+            metadata={"target_email": invitation.target_email},
+        )
+        self._ensure_onboarding_profile(
+            partner.id,
+            PartnerOnboardingProfileUpdate(
+                legal_organization_name=None,
+                display_name=partner.name,
+                organization_type=None,
+                country=None,
+                primary_business_contact=PartnerContactInfo(
+                    name=invitation.target_email.split("@", 1)[0],
+                    email=invitation.target_email.lower(),
+                    phone=None,
+                    title=None,
+                ),
+                finance_contact=None,
+                technical_contact=None,
+                requested_domains=None,
+                requested_capabilities=None,
+                requested_api_embed_access=None,
+                settlement_currency=None,
+            ),
+        )
+        raw_token = f"gntv_inv_{secrets.token_urlsafe(32)}"
+        expires_at = invitation.expires_at or (utc_now() + timedelta(days=14))
+        invite = PartnerInvitation(
+            partner_id=partner.id,
+            target_email=invitation.target_email.lower(),
+            token_hash=self.hash_api_secret(raw_token),
+            status=PartnerInvitationStatus.PENDING,
+            expires_at=expires_at,
+            created_by_user_id=actor_user_id,
+        )
+        audit = self._lifecycle_audit(
+            partner.id,
+            PartnerLifecycleAuditAction.INVITATION_CREATED,
+            actor_user_id,
+            after={"target_email": invitation.target_email.lower(), "expires_at": expires_at.isoformat()},
+        )
+        created_invite = self.repo.create_invitation(invite, audit)
+        return created, self._invitation_response(created_invite, raw_token), raw_token
+
+    def list_invitations(self, partner_id: UUID) -> list[PartnerInvitationResponse]:
+        self.get_partner(partner_id)
+        self.repo.expire_invitations()
+        return [self._invitation_response(item) for item in self.repo.list_invitations(partner_id)]
+
+    def create_invitation_for_partner(
+        self, partner_id: UUID, invitation: PartnerInvitationCreate, actor_user_id: int | None
+    ) -> tuple[PartnerInvitationResponse, str]:
+        partner = self.get_partner(partner_id)
+        if partner.lifecycle_status not in {PartnerLifecycleStatus.PROSPECT, PartnerLifecycleStatus.INVITED}:
+            raise PartnerSecurityError("Partner cannot be invited from current lifecycle state")
+        if partner.lifecycle_status == PartnerLifecycleStatus.PROSPECT:
+            self._transition_lifecycle(
+                partner,
+                PartnerLifecycleStatus.INVITED,
+                PartnerLifecycleAuditAction.INVITATION_CREATED,
+                actor_user_id,
+                metadata={"target_email": invitation.target_email},
+            )
+        raw_token = f"gntv_inv_{secrets.token_urlsafe(32)}"
+        expires_at = invitation.expires_at or (utc_now() + timedelta(days=14))
+        invite = PartnerInvitation(
+            partner_id=partner_id,
+            target_email=invitation.target_email.lower(),
+            token_hash=self.hash_api_secret(raw_token),
+            status=PartnerInvitationStatus.PENDING,
+            expires_at=expires_at,
+            created_by_user_id=actor_user_id,
+        )
+        audit = self._lifecycle_audit(
+            partner_id,
+            PartnerLifecycleAuditAction.INVITATION_CREATED,
+            actor_user_id,
+            after={"target_email": invitation.target_email.lower(), "expires_at": expires_at.isoformat()},
+        )
+        created_invite = self.repo.create_invitation(invite, audit)
+        return self._invitation_response(created_invite, raw_token), raw_token
+
+    def accept_invitation(self, payload: PartnerInvitationAccept) -> PartnerOnboardingStatusResponse:
+        invitation = self.repo.get_invitation_by_token_hash(self.hash_api_secret(payload.token))
+        if invitation is None:
+            raise PartnerSecurityError("Invitation is invalid")
+        if invitation.status == PartnerInvitationStatus.ACCEPTED:
+            return self.lifecycle_status(invitation.partner_id)
+        if invitation.status == PartnerInvitationStatus.REVOKED:
+            raise PartnerSecurityError("Invitation has been revoked")
+        if self._as_utc(invitation.expires_at) <= utc_now():
+            invitation.status = PartnerInvitationStatus.EXPIRED
+            self.repo.db.add(invitation)
+            self.repo.db.commit()
+            raise PartnerSecurityError("Invitation has expired")
+        partner = self.get_partner(invitation.partner_id)
+        self._require_lifecycle(partner, {PartnerLifecycleStatus.INVITED, PartnerLifecycleStatus.PROSPECT})
+        invitation.status = PartnerInvitationStatus.ACCEPTED
+        invitation.accepted_at = utc_now()
+        invitation.accepted_by_user_id = payload.user_id
+        audit = self._lifecycle_audit(
+            partner.id,
+            PartnerLifecycleAuditAction.INVITATION_ACCEPTED,
+            payload.user_id,
+            invitation_id=invitation.id,
+            after={"status": PartnerInvitationStatus.ACCEPTED.value},
+        )
+        self.repo.update_invitation(invitation, audit)
+        if payload.user_id is not None:
+            self._ensure_portal_user(partner.id, payload.user_id, PartnerPortalUserRole.ADMIN.value)
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.ONBOARDING,
+            PartnerLifecycleAuditAction.INVITATION_ACCEPTED,
+            payload.user_id,
+            metadata={"invitation_id": str(invitation.id)},
+        )
+        self._refresh_checklist(partner.id)
+        return self.lifecycle_status(partner.id)
+
+    def revoke_invitation(self, partner_id: UUID, invitation_id: UUID, actor_user_id: int | None) -> PartnerInvitationResponse:
+        self.get_partner(partner_id)
+        invite = next((item for item in self.repo.list_invitations(partner_id) if item.id == invitation_id), None)
+        if invite is None:
+            raise ValueError("Invitation not found")
+        if invite.status == PartnerInvitationStatus.PENDING:
+            invite.status = PartnerInvitationStatus.REVOKED
+            invite.revoked_at = utc_now()
+            audit = self._lifecycle_audit(
+                partner_id,
+                PartnerLifecycleAuditAction.ACCESS_REVOKED,
+                actor_user_id,
+                invitation_id=invite.id,
+                after={"status": PartnerInvitationStatus.REVOKED.value},
+            )
+            invite = self.repo.update_invitation(invite, audit)
+        return self._invitation_response(invite)
+
+    def portal_onboarding_status(self, partner_id: UUID) -> PartnerOnboardingStatusResponse:
+        return self.lifecycle_status(partner_id)
+
+    def lifecycle_status(self, partner_id: UUID) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        checklist = self._refresh_checklist(partner_id)
+        profile = self.repo.get_onboarding_profile(partner_id)
+        completed = sum(1 for item in checklist if item.is_complete)
+        return PartnerOnboardingStatusResponse(
+            partner=PartnerResponse.model_validate(partner),
+            profile=PartnerOnboardingProfileResponse.model_validate(profile) if profile else None,
+            checklist=[PartnerOnboardingChecklistItemResponse.model_validate(item) for item in checklist],
+            checklist_complete_count=completed,
+            checklist_total_count=len(checklist),
+            can_submit=partner.lifecycle_status in {PartnerLifecycleStatus.ONBOARDING, PartnerLifecycleStatus.INVITED},
+            can_approve=partner.lifecycle_status == PartnerLifecycleStatus.PENDING_REVIEW,
+            can_activate=partner.lifecycle_status == PartnerLifecycleStatus.APPROVED,
+            audit=[PartnerLifecycleAuditResponse.model_validate(item) for item in self.repo.list_lifecycle_audits(partner_id)],
+        )
+
+    def update_onboarding_profile(
+        self, partner_id: UUID, payload: PartnerOnboardingProfileUpdate | PartnerOperatorOnboardingUpdate
+    ) -> PartnerOnboardingProfileResponse:
+        partner = self.get_partner(partner_id)
+        if partner.lifecycle_status in {PartnerLifecycleStatus.SUSPENDED, PartnerLifecycleStatus.TERMINATED}:
+            raise PartnerSecurityError("Partner onboarding is not editable in current lifecycle state")
+        profile = self._ensure_onboarding_profile(partner_id, payload)
+        self._refresh_checklist(partner_id)
+        return PartnerOnboardingProfileResponse.model_validate(profile)
+
+    def submit_onboarding(self, partner_id: UUID, actor_user_id: int | None = None) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        self._require_lifecycle(partner, {PartnerLifecycleStatus.INVITED, PartnerLifecycleStatus.ONBOARDING})
+        checklist = self._refresh_checklist(partner_id)
+        required = {
+            PartnerOnboardingChecklistKey.ORGANIZATION_PROFILE_COMPLETE,
+            PartnerOnboardingChecklistKey.PORTAL_ACCESS_PROVISIONED,
+        }
+        completed = {item.item_key for item in checklist if item.is_complete}
+        if not required.issubset(completed):
+            raise PartnerSecurityError("Required onboarding profile and portal access checklist items are incomplete")
+        profile = self.repo.get_onboarding_profile(partner_id)
+        if profile is not None:
+            profile.submitted_at = utc_now()
+            self.repo.upsert_onboarding_profile(profile)
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.PENDING_REVIEW,
+            PartnerLifecycleAuditAction.ONBOARDING_SUBMITTED,
+            actor_user_id,
+        )
+        self._record_portal_event(
+            partner_id,
+            PartnerPortalEventType.ONBOARDING_SUBMITTED,
+            "Onboarding submitted",
+            "Your partner onboarding profile is pending GNTV operator review.",
+        )
+        return self.lifecycle_status(partner_id)
+
+    def return_onboarding(
+        self, partner_id: UUID, payload: PartnerOnboardingReviewRequest, actor_user_id: int | None
+    ) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        self._require_lifecycle(partner, {PartnerLifecycleStatus.PENDING_REVIEW, PartnerLifecycleStatus.APPROVED})
+        profile = self.repo.get_onboarding_profile(partner_id)
+        if profile:
+            profile.review_notes = payload.review_notes
+            profile.reviewed_at = utc_now()
+            profile.reviewed_by_user_id = actor_user_id
+            self.repo.upsert_onboarding_profile(profile)
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.ONBOARDING,
+            PartnerLifecycleAuditAction.ONBOARDING_RETURNED,
+            actor_user_id,
+            metadata={"review_notes": payload.review_notes},
+        )
+        self._record_portal_event(
+            partner_id,
+            PartnerPortalEventType.ONBOARDING_RETURNED,
+            "Changes requested",
+            "GNTV reviewed your onboarding and requested updates.",
+            severity="warning",
+            payload={"review_notes": payload.review_notes},
+        )
+        return self.lifecycle_status(partner_id)
+
+    def approve_partner(
+        self, partner_id: UUID, payload: PartnerOnboardingReviewRequest, actor_user_id: int | None
+    ) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        self._require_lifecycle(partner, {PartnerLifecycleStatus.PENDING_REVIEW})
+        profile = self.repo.get_onboarding_profile(partner_id)
+        if profile is None:
+            raise PartnerSecurityError("Onboarding profile is required before approval")
+        profile.review_notes = payload.review_notes
+        profile.reviewed_at = utc_now()
+        profile.reviewed_by_user_id = actor_user_id
+        self.repo.upsert_onboarding_profile(profile)
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.APPROVED,
+            PartnerLifecycleAuditAction.PARTNER_APPROVED,
+            actor_user_id,
+            metadata={"review_notes": payload.review_notes},
+        )
+        self._record_portal_event(
+            partner_id,
+            PartnerPortalEventType.PARTNER_APPROVED,
+            "Partner approved",
+            "Your partner onboarding has been approved. Activation is still controlled by GNTV.",
+            severity="success",
+        )
+        return self.lifecycle_status(partner_id)
+
+    def activate_partner(
+        self, partner_id: UUID, actor_user_id: int | None
+    ) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        if partner.lifecycle_status == PartnerLifecycleStatus.ACTIVE:
+            self._provision_partner_access(partner_id, actor_user_id)
+            return self.lifecycle_status(partner_id)
+        self._require_lifecycle(partner, {PartnerLifecycleStatus.APPROVED})
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.ACTIVE,
+            PartnerLifecycleAuditAction.PARTNER_ACTIVATED,
+            actor_user_id,
+            status=PartnerStatus.ACTIVE,
+        )
+        self._provision_partner_access(partner_id, actor_user_id)
+        self._record_portal_event(
+            partner_id,
+            PartnerPortalEventType.PARTNER_ACTIVATED,
+            "Partner activated",
+            "Your GNTV Digital partner access is active.",
+            severity="success",
+        )
+        return self.lifecycle_status(partner_id)
+
+    def suspend_partner(
+        self, partner_id: UUID, payload: PartnerLifecycleActionRequest, actor_user_id: int | None
+    ) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        self._require_lifecycle(partner, {PartnerLifecycleStatus.ACTIVE})
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.SUSPENDED,
+            PartnerLifecycleAuditAction.PARTNER_SUSPENDED,
+            actor_user_id,
+            status=PartnerStatus.SUSPENDED,
+            metadata={"reason": payload.reason},
+        )
+        self._revoke_operational_access(partner_id, actor_user_id)
+        self._record_portal_event(
+            partner_id,
+            PartnerPortalEventType.PARTNER_SUSPENDED,
+            "Partner suspended",
+            "Operational access has been suspended. Historical statements remain available to operators.",
+            severity="warning",
+        )
+        return self.lifecycle_status(partner_id)
+
+    def reactivate_partner(
+        self, partner_id: UUID, actor_user_id: int | None
+    ) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        self._require_lifecycle(partner, {PartnerLifecycleStatus.SUSPENDED})
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.ACTIVE,
+            PartnerLifecycleAuditAction.PARTNER_REACTIVATED,
+            actor_user_id,
+            status=PartnerStatus.ACTIVE,
+        )
+        self._provision_partner_access(partner_id, actor_user_id)
+        self._record_portal_event(
+            partner_id,
+            PartnerPortalEventType.PARTNER_REACTIVATED,
+            "Partner reactivated",
+            "Your GNTV Digital partner access has been reactivated.",
+            severity="success",
+        )
+        return self.lifecycle_status(partner_id)
+
+    def terminate_partner(
+        self, partner_id: UUID, payload: PartnerLifecycleActionRequest, actor_user_id: int | None
+    ) -> PartnerOnboardingStatusResponse:
+        partner = self.get_partner(partner_id)
+        if partner.lifecycle_status == PartnerLifecycleStatus.TERMINATED:
+            return self.lifecycle_status(partner_id)
+        self._require_lifecycle(
+            partner,
+            {
+                PartnerLifecycleStatus.INVITED,
+                PartnerLifecycleStatus.ONBOARDING,
+                PartnerLifecycleStatus.PENDING_REVIEW,
+                PartnerLifecycleStatus.APPROVED,
+                PartnerLifecycleStatus.ACTIVE,
+                PartnerLifecycleStatus.SUSPENDED,
+            },
+        )
+        self._transition_lifecycle(
+            partner,
+            PartnerLifecycleStatus.TERMINATED,
+            PartnerLifecycleAuditAction.PARTNER_TERMINATED,
+            actor_user_id,
+            status=PartnerStatus.SUSPENDED,
+            metadata={"reason": payload.reason},
+        )
+        self._revoke_operational_access(partner_id, actor_user_id, revoke_portal=True)
+        self._record_portal_event(
+            partner_id,
+            PartnerPortalEventType.PARTNER_TERMINATED,
+            "Partner terminated",
+            "Partner access has been terminated. Historical records remain preserved.",
+            severity="warning",
+            visible_to_partner=False,
+        )
+        return self.lifecycle_status(partner_id)
 
     def list_partners(self) -> list[Partner]:
         return self.repo.list_partners()
@@ -1028,7 +1430,10 @@ class PartnerSyndicationService:
                 continue
             if self.verify_api_secret(raw_secret, credential.secret_hash):
                 partner = credential.partner
-                if partner is None or partner.status != PartnerStatus.ACTIVE:
+                if partner is None or partner.status == PartnerStatus.SUSPENDED or partner.lifecycle_status in {
+                    PartnerLifecycleStatus.SUSPENDED,
+                    PartnerLifecycleStatus.TERMINATED,
+                }:
                     raise PartnerSecurityError("Partner portal access is not active")
                 credential.last_used_at = utc_now()
                 self.repo.db.add(credential)
@@ -1274,6 +1679,262 @@ class PartnerSyndicationService:
         self.get_partner(partner_id)
         return self.repo.list_portal_users(partner_id)
 
+    def operator_onboarding_update(
+        self, partner_id: UUID, payload: PartnerOperatorOnboardingUpdate, actor_user_id: int | None
+    ) -> PartnerOnboardingProfileResponse:
+        partner = self.get_partner(partner_id)
+        if partner.lifecycle_status == PartnerLifecycleStatus.TERMINATED:
+            raise PartnerSecurityError("Terminated partner onboarding cannot be changed")
+        profile = self._ensure_onboarding_profile(partner_id, payload)
+        if payload.approved_domains is not None:
+            profile.approved_domains_json = payload.approved_domains
+        if payload.payout_readiness_status is not None:
+            profile.payout_readiness_status = payload.payout_readiness_status
+        if payload.review_notes is not None:
+            profile.review_notes = payload.review_notes
+        profile.reviewed_by_user_id = actor_user_id
+        profile.reviewed_at = utc_now()
+        updated = self.repo.upsert_onboarding_profile(profile)
+        self._refresh_checklist(partner_id)
+        return PartnerOnboardingProfileResponse.model_validate(updated)
+
+    def _ensure_onboarding_profile(
+        self,
+        partner_id: UUID,
+        payload: PartnerOnboardingProfileUpdate | PartnerOperatorOnboardingUpdate,
+    ) -> PartnerOnboardingProfile:
+        profile = self.repo.get_onboarding_profile(partner_id)
+        if profile is None:
+            profile = PartnerOnboardingProfile(partner_id=partner_id)
+        before = self._profile_snapshot(profile)
+        if payload.legal_organization_name is not None:
+            profile.legal_organization_name = payload.legal_organization_name
+        if payload.display_name is not None:
+            profile.display_name = payload.display_name
+        if payload.organization_type is not None:
+            profile.organization_type = payload.organization_type
+        if payload.country is not None:
+            profile.country = payload.country.upper()
+        if payload.primary_business_contact is not None:
+            profile.primary_business_contact_json = payload.primary_business_contact.model_dump()
+        if payload.finance_contact is not None:
+            profile.finance_contact_json = payload.finance_contact.model_dump()
+        if payload.technical_contact is not None:
+            profile.technical_contact_json = payload.technical_contact.model_dump()
+        if payload.requested_domains is not None:
+            profile.requested_domains_json = payload.requested_domains
+        if payload.requested_capabilities is not None:
+            profile.requested_capabilities_json = payload.requested_capabilities
+        if payload.requested_api_embed_access is not None:
+            profile.requested_api_embed_access = payload.requested_api_embed_access
+        if payload.settlement_currency is not None:
+            profile.settlement_currency = payload.settlement_currency.upper()
+        profile.updated_at = utc_now()
+        updated = self.repo.upsert_onboarding_profile(profile)
+        self.repo.create_lifecycle_audit(
+            self._lifecycle_audit(
+                partner_id,
+                PartnerLifecycleAuditAction.PROFILE_UPDATED,
+                None,
+                before=before,
+                after=self._profile_snapshot(updated),
+            )
+        )
+        return updated
+
+    def _refresh_checklist(self, partner_id: UUID) -> list[PartnerOnboardingChecklistItem]:
+        profile = self.repo.get_onboarding_profile(partner_id)
+        partner = self.get_partner(partner_id)
+        entitlements = self.repo.list_entitlements(partner_id)
+        agreements = self.repo.list_revenue_share_agreements(partner_id)
+        accounts = self.repo.list_payout_accounts(partner_id)
+        portal_users = self.repo.list_portal_users(partner_id)
+        checks: list[tuple[PartnerOnboardingChecklistKey, str, bool, str]] = [
+            (
+                PartnerOnboardingChecklistKey.ORGANIZATION_PROFILE_COMPLETE,
+                "Organization profile complete",
+                bool(
+                    profile
+                    and profile.legal_organization_name
+                    and profile.display_name
+                    and profile.organization_type
+                    and profile.country
+                    and profile.primary_business_contact_json
+                ),
+                "partner_onboarding_profiles",
+            ),
+            (
+                PartnerOnboardingChecklistKey.BUSINESS_CONTACT_VERIFIED,
+                "Business contact verified",
+                bool(profile and profile.primary_business_contact_json and profile.reviewed_at),
+                "operator_review",
+            ),
+            (
+                PartnerOnboardingChecklistKey.TECHNICAL_CONTACT_VERIFIED,
+                "Technical contact verified",
+                bool(profile and profile.technical_contact_json and profile.reviewed_at),
+                "operator_review",
+            ),
+            (
+                PartnerOnboardingChecklistKey.DOMAINS_REVIEWED,
+                "Domains reviewed",
+                bool(profile and profile.approved_domains_json),
+                "partner_onboarding_profiles.approved_domains_json",
+            ),
+            (
+                PartnerOnboardingChecklistKey.SYNDICATION_ENTITLEMENTS_APPROVED,
+                "Syndication entitlements approved",
+                bool(entitlements),
+                "partner_entitlements",
+            ),
+            (
+                PartnerOnboardingChecklistKey.API_EMBED_ACCESS_APPROVED,
+                "API/embed access approved",
+                bool(profile and profile.requested_api_embed_access and partner.lifecycle_status in {PartnerLifecycleStatus.APPROVED, PartnerLifecycleStatus.ACTIVE}),
+                "operator_lifecycle",
+            ),
+            (
+                PartnerOnboardingChecklistKey.REVENUE_SHARE_AGREEMENT_CONFIGURED,
+                "Revenue-share agreement configured",
+                bool(agreements),
+                "partner_revenue_share_agreements",
+            ),
+            (
+                PartnerOnboardingChecklistKey.PAYOUT_ACCOUNT_CONFIGURED,
+                "Payout account configured",
+                bool(accounts),
+                "partner_payout_accounts",
+            ),
+            (
+                PartnerOnboardingChecklistKey.PAYOUT_ACCOUNT_VERIFIED,
+                "Payout account verified",
+                any(item.verification_status == PartnerPayoutVerificationStatus.VERIFIED for item in accounts),
+                "partner_payout_accounts.verification_status",
+            ),
+            (
+                PartnerOnboardingChecklistKey.PORTAL_ACCESS_PROVISIONED,
+                "Portal access provisioned",
+                bool(portal_users),
+                "partner_portal_users",
+            ),
+        ]
+        observed_at = utc_now()
+        for key, title, complete, source in checks:
+            item = self.repo.get_checklist_item(partner_id, key)
+            if item is None:
+                item = PartnerOnboardingChecklistItem(
+                    partner_id=partner_id,
+                    item_key=key,
+                    title=title,
+                    derived_from=source,
+                    is_complete=complete,
+                    completed_at=observed_at if complete else None,
+                )
+            else:
+                item.title = title
+                item.derived_from = source
+                if complete and not item.is_complete:
+                    item.completed_at = observed_at
+                if not complete:
+                    item.completed_at = None
+                item.is_complete = complete
+                item.updated_at = observed_at
+            self.repo.upsert_checklist_item(item)
+        return self.repo.list_checklist_items(partner_id)
+
+    def _transition_lifecycle(
+        self,
+        partner: Partner,
+        target: PartnerLifecycleStatus,
+        action: PartnerLifecycleAuditAction,
+        actor_user_id: int | None,
+        status: PartnerStatus | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> PartnerLifecycleAuditLog:
+        current = partner.lifecycle_status
+        if target != current and target not in self._allowed_lifecycle_transitions().get(current, set()):
+            raise PartnerSecurityError(f"Invalid partner lifecycle transition: {current.value} to {target.value}")
+        before = {"lifecycle_status": current.value, "status": partner.status.value}
+        partner.lifecycle_status = target
+        partner.lifecycle_updated_at = utc_now()
+        if status is not None:
+            partner.status = status
+        partner = self.repo.update_partner(partner)
+        audit = self.repo.create_lifecycle_audit(
+            self._lifecycle_audit(
+                partner.id,
+                action,
+                actor_user_id,
+                before=before,
+                after={"lifecycle_status": target.value, "status": partner.status.value},
+                metadata=metadata,
+            )
+        )
+        return audit
+
+    def _allowed_lifecycle_transitions(self) -> dict[PartnerLifecycleStatus, set[PartnerLifecycleStatus]]:
+        return {
+            PartnerLifecycleStatus.PROSPECT: {PartnerLifecycleStatus.INVITED, PartnerLifecycleStatus.TERMINATED},
+            PartnerLifecycleStatus.INVITED: {PartnerLifecycleStatus.ONBOARDING, PartnerLifecycleStatus.TERMINATED},
+            PartnerLifecycleStatus.ONBOARDING: {PartnerLifecycleStatus.PENDING_REVIEW, PartnerLifecycleStatus.TERMINATED},
+            PartnerLifecycleStatus.PENDING_REVIEW: {PartnerLifecycleStatus.ONBOARDING, PartnerLifecycleStatus.APPROVED, PartnerLifecycleStatus.TERMINATED},
+            PartnerLifecycleStatus.APPROVED: {PartnerLifecycleStatus.ONBOARDING, PartnerLifecycleStatus.ACTIVE, PartnerLifecycleStatus.TERMINATED},
+            PartnerLifecycleStatus.ACTIVE: {PartnerLifecycleStatus.SUSPENDED, PartnerLifecycleStatus.TERMINATED},
+            PartnerLifecycleStatus.SUSPENDED: {PartnerLifecycleStatus.ACTIVE, PartnerLifecycleStatus.TERMINATED},
+            PartnerLifecycleStatus.TERMINATED: set(),
+        }
+
+    def _require_lifecycle(self, partner: Partner, allowed: set[PartnerLifecycleStatus]) -> None:
+        if partner.lifecycle_status not in allowed:
+            raise PartnerSecurityError(
+                f"Partner lifecycle state {partner.lifecycle_status.value} does not allow this action"
+            )
+
+    def _provision_partner_access(self, partner_id: UUID, actor_user_id: int | None) -> None:
+        profile = self.repo.get_onboarding_profile(partner_id)
+        if profile:
+            for domain in profile.approved_domains_json:
+                try:
+                    self.add_domain(partner_id, PartnerDomainCreate(domain_pattern=domain, origin_pattern=None))
+                except Exception:
+                    pass
+        self.repo.create_lifecycle_audit(
+            self._lifecycle_audit(
+                partner_id,
+                PartnerLifecycleAuditAction.ACCESS_PROVISIONED,
+                actor_user_id,
+                after={"provisioning": "idempotent"},
+            )
+        )
+        self._refresh_checklist(partner_id)
+
+    def _revoke_operational_access(
+        self, partner_id: UUID, actor_user_id: int | None, revoke_portal: bool = False
+    ) -> None:
+        for credential in self.get_partner(partner_id).credentials:
+            if credential.status == PartnerCredentialStatus.ACTIVE:
+                credential.status = PartnerCredentialStatus.REVOKED
+                credential.revoked_at = utc_now()
+                self.repo.db.add(credential)
+        for entitlement in self.repo.list_entitlements(partner_id):
+            entitlement.status = PartnerEntitlementStatus.REVOKED
+            self.repo.db.add(entitlement)
+        for domain in self.repo.list_domains(partner_id):
+            domain.status = PartnerDomainStatus.DISABLED
+            self.repo.db.add(domain)
+        if revoke_portal:
+            for portal_user in self.repo.list_portal_users(partner_id):
+                self.repo.db.delete(portal_user)
+        self.repo.db.commit()
+        self.repo.create_lifecycle_audit(
+            self._lifecycle_audit(
+                partner_id,
+                PartnerLifecycleAuditAction.ACCESS_REVOKED,
+                actor_user_id,
+                after={"portal_revoked": revoke_portal},
+            )
+        )
+        self._refresh_checklist(partner_id)
 
     def portal_events(
         self,
@@ -1495,6 +2156,67 @@ class PartnerSyndicationService:
             after_json=after,
         )
 
+    def _lifecycle_audit(
+        self,
+        partner_id: UUID,
+        action: PartnerLifecycleAuditAction,
+        actor_user_id: int | None,
+        before: dict[str, Any] | None = None,
+        after: dict[str, Any] | None = None,
+        metadata: dict[str, object] | None = None,
+        invitation_id: UUID | None = None,
+    ) -> PartnerLifecycleAuditLog:
+        return PartnerLifecycleAuditLog(
+            partner_id=partner_id,
+            action=action,
+            actor_user_id=actor_user_id,
+            invitation_id=invitation_id,
+            before_json=before,
+            after_json=after,
+            metadata_json=metadata,
+        )
+
+    def _profile_snapshot(self, profile: PartnerOnboardingProfile) -> dict[str, object | None]:
+        return {
+            "legal_organization_name": profile.legal_organization_name,
+            "display_name": profile.display_name,
+            "organization_type": profile.organization_type.value if profile.organization_type else None,
+            "country": profile.country,
+            "requested_domains": list(profile.requested_domains_json or []),
+            "approved_domains": list(profile.approved_domains_json or []),
+            "requested_capabilities": list(profile.requested_capabilities_json or []),
+            "requested_api_embed_access": bool(profile.requested_api_embed_access),
+            "settlement_currency": profile.settlement_currency,
+            "payout_readiness_status": (
+                profile.payout_readiness_status.value
+                if profile.payout_readiness_status
+                else PartnerPayoutReadinessStatus.NOT_STARTED.value
+            ),
+        }
+
+    def _invitation_response(
+        self, invitation: PartnerInvitation, raw_token: str | None = None
+    ) -> PartnerInvitationResponse:
+        return PartnerInvitationResponse(
+            id=invitation.id,
+            partner_id=invitation.partner_id,
+            target_email=invitation.target_email,
+            status=invitation.status,
+            expires_at=invitation.expires_at,
+            accepted_at=invitation.accepted_at,
+            revoked_at=invitation.revoked_at,
+            created_by_user_id=invitation.created_by_user_id,
+            accepted_by_user_id=invitation.accepted_by_user_id,
+            created_at=invitation.created_at,
+            invitation_reference=raw_token,
+        )
+
+    def _ensure_portal_user(self, partner_id: UUID, user_id: int, role: str) -> PartnerPortalUser:
+        existing = next((item for item in self.repo.list_portal_users(partner_id) if item.user_id == user_id), None)
+        if existing is not None:
+            return existing
+        return self.repo.create_portal_user(PartnerPortalUser(partner_id=partner_id, user_id=user_id, role=role))
+
     def _record_portal_event(
         self,
         partner_id: UUID,
@@ -1505,6 +2227,7 @@ class PartnerSyndicationService:
         resource_id: UUID | None = None,
         severity: str = "info",
         payload: dict[str, object] | None = None,
+        visible_to_partner: bool = True,
     ) -> None:
         self.repo.create_portal_event(
             PartnerPortalEvent(
@@ -1516,6 +2239,7 @@ class PartnerSyndicationService:
                 resource_id=resource_id,
                 severity=severity,
                 payload_json=payload,
+                visible_to_partner=visible_to_partner,
             )
         )
 
@@ -1571,6 +2295,11 @@ class PartnerSyndicationService:
     def _validate_range(self, period_start: datetime | None, period_end: datetime | None) -> None:
         if period_start and period_end and period_start >= period_end:
             raise ValueError("period_start must be before period_end")
+
+    def _as_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     def _limit(self, value: int) -> int:
         return max(1, min(value, 250))
