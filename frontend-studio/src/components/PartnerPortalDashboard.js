@@ -18,6 +18,7 @@ export function initPartnerPortalDashboard(container) {
     statements: [],
     payouts: [],
     reconciliation: [],
+    onboarding: null,
     events: []
   };
   const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -53,7 +54,7 @@ export function initPartnerPortalDashboard(container) {
     render();
     try {
       const q = query();
-      const [me, overview, usage, revenue, statements, payouts, reconciliation, events] = await Promise.all([
+      const [me, overview, usage, revenue, statements, payouts, reconciliation, onboarding, events] = await Promise.all([
         api("/api/v1/partner-portal/me"),
         api(`/api/v1/partner-portal/overview${q}`),
         api(`/api/v1/partner-portal/usage${q}`),
@@ -61,9 +62,10 @@ export function initPartnerPortalDashboard(container) {
         api(`/api/v1/partner-portal/statements${q}`),
         api(`/api/v1/partner-portal/payouts${q}`),
         api(`/api/v1/partner-portal/reconciliation${q}`),
+        api("/api/v1/partner-portal/onboarding"),
         api(`/api/v1/partner-portal/events${q}`)
       ]);
-      data = { me, overview, usage, revenue, statements, payouts, reconciliation, events };
+      data = { me, overview, usage, revenue, statements, payouts, reconciliation, onboarding, events };
     } catch (err) {
       error = err.message || "Unable to load partner portal data.";
     } finally {
@@ -228,6 +230,49 @@ export function initPartnerPortalDashboard(container) {
     `;
   }
 
+  function onboarding() {
+    const state = data.onboarding;
+    const profile = state?.profile || {};
+    const checklist = state?.checklist || [];
+    if (!state) return `<div class="portal-empty">Connect a partner portal key or sign in to continue onboarding.</div>`;
+    return `
+      <div class="portal-split">
+        <section class="portal-panel">
+          <h3>Onboarding Status</h3>
+          <div class="portal-kpis">
+            <div class="portal-card"><span>Lifecycle</span><strong>${state.partner.lifecycle_status}</strong></div>
+            <div class="portal-card"><span>Checklist</span><strong>${state.checklist_complete_count}/${state.checklist_total_count}</strong></div>
+          </div>
+          ${rows(checklist, [
+            { label: "Step", render: (x) => x.title },
+            { label: "Status", render: (x) => `<span class="portal-pill ${x.is_complete ? "good" : "warn"}">${x.is_complete ? "Complete" : "Open"}</span>` },
+            { label: "Source", render: (x) => x.derived_from || "review" }
+          ], "No onboarding checklist exists yet.")}
+          <button class="portal-btn" id="portal-submit-onboarding" type="button" ${state.can_submit ? "" : "disabled"}>Submit for Review</button>
+        </section>
+        <section class="portal-panel">
+          <h3>Organization Profile</h3>
+          <form class="portal-form" id="portal-onboarding-form">
+            <label>Legal Name <input name="legal_organization_name" required value="${profile.legal_organization_name || ""}"></label>
+            <label>Display Name <input name="display_name" required value="${profile.display_name || data.me?.partner?.name || ""}"></label>
+            <label>Organization Type
+              <select name="organization_type">
+                ${["broadcaster","media_network","community_organization","education","business","other"].map((value) => `<option value="${value}" ${profile.organization_type === value ? "selected" : ""}>${value}</option>`).join("")}
+              </select>
+            </label>
+            <label>Country <input name="country" maxlength="2" value="${profile.country || ""}" placeholder="KE"></label>
+            <label>Business Contact Email <input name="business_email" type="email" value="${profile.primary_business_contact_json?.email || ""}"></label>
+            <label>Technical Contact Email <input name="technical_email" type="email" value="${profile.technical_contact_json?.email || ""}"></label>
+            <label>Requested Domains <input name="requested_domains" value="${(profile.requested_domains_json || []).join(", ")}" placeholder="player.partner.test"></label>
+            <label>Requested Capabilities <input name="requested_capabilities" value="${(profile.requested_capabilities_json || []).join(", ")}" placeholder="live_embed, api_reporting"></label>
+            <label>Settlement Currency <input name="settlement_currency" maxlength="3" value="${profile.settlement_currency || "USD"}"></label>
+            <button class="portal-btn secondary" type="submit">Save Onboarding Profile</button>
+          </form>
+        </section>
+      </div>
+    `;
+  }
+
   function eventList() {
     if (!data.events?.length) return `<div class="portal-empty">No partner-visible status events yet.</div>`;
     return data.events.map((event) => `
@@ -246,6 +291,7 @@ export function initPartnerPortalDashboard(container) {
     if (activeTab === "statements") return `<section class="portal-panel"><h3>Statements</h3>${statements()}</section>`;
     if (activeTab === "payouts") return `<section class="portal-panel"><h3>Payouts</h3>${payouts()}</section>`;
     if (activeTab === "reconciliation") return `<section class="portal-panel"><h3>Reconciliation</h3>${reconciliation()}</section>`;
+    if (activeTab === "onboarding") return onboarding();
     if (activeTab === "entitlements") return overview();
     if (activeTab === "profile") return profile();
     return overview();
@@ -260,8 +306,11 @@ export function initPartnerPortalDashboard(container) {
         .portal-hero h1 { margin:0 0 8px; font-size: clamp(26px, 4vw, 44px); letter-spacing:0; }
         .portal-hero p, .portal-muted { color:rgba(238,244,255,.68); margin:0; line-height:1.5; }
         .portal-login { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; min-width:min(460px, 100%); }
-        .portal-login input, .portal-filter input { min-width:170px; flex:1; color:#fff; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:11px 12px; outline:none; }
+        .portal-login input, .portal-filter input, .portal-form input, .portal-form select { min-width:170px; flex:1; color:#fff; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:11px 12px; outline:none; }
+        .portal-form { display:grid; gap:10px; }
+        .portal-form label { display:grid; gap:6px; color:rgba(238,244,255,.68); font-size:12px; font-weight:800; text-transform:uppercase; }
         .portal-btn { border:0; border-radius:12px; padding:11px 15px; color:#06101f; background:#ff8a00; font-weight:850; cursor:pointer; box-shadow:0 12px 28px rgba(255,138,0,.24); }
+        .portal-btn:disabled { opacity:.45; cursor:not-allowed; box-shadow:none; }
         .portal-btn.secondary { background:rgba(255,255,255,.08); color:#eaf2ff; border:1px solid rgba(255,255,255,.14); box-shadow:none; }
         .portal-tabs, .portal-filter { display:flex; gap:8px; flex-wrap:wrap; margin: 0 0 18px; }
         .portal-tab { border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.05); color:#c8d5e8; border-radius:999px; padding:9px 13px; cursor:pointer; font-weight:800; }
@@ -310,7 +359,7 @@ export function initPartnerPortalDashboard(container) {
           <a class="portal-btn" style="text-decoration:none" href="${apiBase}/api/v1/partner-portal/exports?report_type=statements&format=csv" id="portal-export-link">Export CSV</a>
         </form>
         <nav class="portal-tabs">
-          ${["overview","usage","revenue","statements","payouts","reconciliation","entitlements","profile"].map((tab) => `
+        ${["overview","onboarding","usage","revenue","statements","payouts","reconciliation","entitlements","profile"].map((tab) => `
             <button class="portal-tab ${activeTab === tab ? "active" : ""}" data-tab="${tab}">${tab.replace("-", " ")}</button>
           `).join("")}
         </nav>
@@ -344,7 +393,7 @@ export function initPartnerPortalDashboard(container) {
       clear.addEventListener("click", () => {
         portalKey = "";
         localStorage.removeItem("gntv_partner_portal_key");
-        data = { me: null, overview: null, usage: null, revenue: null, statements: [], payouts: [], reconciliation: [], events: [] };
+        data = { me: null, overview: null, usage: null, revenue: null, statements: [], payouts: [], reconciliation: [], onboarding: null, events: [] };
         render();
       });
     }
@@ -390,6 +439,67 @@ export function initPartnerPortalDashboard(container) {
           });
       });
     }
+    const onboardingForm = container.querySelector("#portal-onboarding-form");
+    if (onboardingForm) {
+      onboardingForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = new FormData(onboardingForm);
+        const requestedDomains = String(form.get("requested_domains") || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+        const requestedCapabilities = String(form.get("requested_capabilities") || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+        try {
+          await fetch(`${apiBase}/api/v1/partner-portal/onboarding/profile`, {
+            method: "PATCH",
+            headers: headers(),
+            body: JSON.stringify({
+              legal_organization_name: form.get("legal_organization_name"),
+              display_name: form.get("display_name"),
+              organization_type: form.get("organization_type"),
+              country: String(form.get("country") || "").toUpperCase(),
+              primary_business_contact: {
+                name: "Primary contact",
+                email: form.get("business_email")
+              },
+              technical_contact: {
+                name: "Technical contact",
+                email: form.get("technical_email")
+              },
+              requested_domains: requestedDomains,
+              requested_capabilities: requestedCapabilities,
+              requested_api_embed_access: requestedCapabilities.length > 0,
+              settlement_currency: String(form.get("settlement_currency") || "USD").toUpperCase()
+            })
+          }).then((response) => {
+            if (!response.ok) throw new Error("Unable to save onboarding profile");
+            return response.json();
+          });
+          await refresh();
+        } catch (err) {
+          error = err.message || "Unable to save onboarding profile.";
+          render();
+        }
+      });
+    }
+    container.querySelector("#portal-submit-onboarding")?.addEventListener("click", async () => {
+      try {
+        await fetch(`${apiBase}/api/v1/partner-portal/onboarding/submit`, {
+          method: "POST",
+          headers: headers()
+        }).then((response) => {
+          if (!response.ok) throw new Error("Unable to submit onboarding");
+          return response.json();
+        });
+        await refresh();
+      } catch (err) {
+        error = err.message || "Unable to submit onboarding.";
+        render();
+      }
+    });
   }
 
   render();

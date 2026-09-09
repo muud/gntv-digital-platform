@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.modules.partners.models import Partner, PartnerCredentialStatus, PartnerPayoutStatus
+from app.modules.partners.models import Partner, PartnerCredentialStatus, PartnerLifecycleStatus, PartnerPayoutStatus
 from app.modules.partners.repository import PartnerRepository
 from app.modules.partners.schemas import (
     EmbedAuthorizeRequest,
@@ -47,6 +47,16 @@ from app.modules.partners.schemas import (
     PartnerPortalSettlementResponse,
     PartnerPortalStatementResponse,
     PartnerPortalUsageSummaryResponse,
+    PartnerInvitationAccept,
+    PartnerInvitationCreate,
+    PartnerInvitationPartnerCreateRequest,
+    PartnerInvitationResponse,
+    PartnerLifecycleActionRequest,
+    PartnerOnboardingProfileResponse,
+    PartnerOnboardingProfileUpdate,
+    PartnerOnboardingReviewRequest,
+    PartnerOnboardingStatusResponse,
+    PartnerOperatorOnboardingUpdate,
     PartnerReconciliationCreate,
     PartnerReconciliationResponse,
     PartnerRevenueShareAgreementCreate,
@@ -161,10 +171,13 @@ def require_partner_portal(
             portal_user = service.repo.get_portal_user(user.id)
             if portal_user:
                 partner = service.repo.get_partner(portal_user.partner_id)
-                if partner and partner.status.value == "active":
+                if partner and partner.status.value != "suspended" and partner.lifecycle_status not in {
+                    PartnerLifecycleStatus.SUSPENDED,
+                    PartnerLifecycleStatus.TERMINATED,
+                }:
                     return partner
                 elif partner:
-                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Partner account is not active")
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Partner portal access is not active")
 
             user_roles = set(user.role_names) if hasattr(user, "role_names") else {r.name for r in user.roles}
             if {"admin", "operator", "super_admin"} & user_roles:
@@ -244,6 +257,36 @@ def get_partner_analytics_overview(
     return service.analytics_overview()
 
 
+@partners_router.post(
+    "/lifecycle/invitations",
+    response_model=PartnerInvitationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create and invite a partner prospect into onboarding",
+)
+def create_partner_lifecycle_invitation(
+    payload: PartnerInvitationPartnerCreateRequest,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerInvitationResponse:
+    try:
+        _, invite, _ = service.create_partner_invitation(payload.partner, payload.invitation, actor_user_id=user.id)
+        return invite
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/lifecycle/queue",
+    response_model=list[PartnerOnboardingStatusResponse],
+    summary="List partners in lifecycle onboarding queue",
+)
+def list_partner_lifecycle_queue(
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerOnboardingStatusResponse]:
+    return [service.lifecycle_status(partner.id) for partner in service.list_partners()]
+
+
 @partners_router.get(
     "/{partner_id}",
     response_model=PartnerResponse,
@@ -258,6 +301,191 @@ def get_partner(
         return PartnerResponse.model_validate(service.get_partner(partner_id))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/lifecycle",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Get partner lifecycle and onboarding state",
+)
+def get_partner_lifecycle(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.lifecycle_status(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.patch(
+    "/{partner_id}/lifecycle/onboarding",
+    response_model=PartnerOnboardingProfileResponse,
+    summary="Operator update of partner onboarding profile and approved access fields",
+)
+def operator_update_partner_onboarding(
+    partner_id: UUID,
+    payload: PartnerOperatorOnboardingUpdate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingProfileResponse:
+    try:
+        return service.operator_onboarding_update(partner_id, payload, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.get(
+    "/{partner_id}/lifecycle/invitations",
+    response_model=list[PartnerInvitationResponse],
+    summary="List partner invitations",
+)
+def list_partner_invitations(
+    partner_id: UUID,
+    _: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> list[PartnerInvitationResponse]:
+    try:
+        return service.list_invitations(partner_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/invitations",
+    response_model=PartnerInvitationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Invite an existing partner into onboarding",
+)
+def invite_existing_partner(
+    partner_id: UUID,
+    invitation: PartnerInvitationCreate,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerInvitationResponse:
+    try:
+        invite, _ = service.create_invitation_for_partner(partner_id, invitation, actor_user_id=user.id)
+        return invite
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/invitations/{invitation_id}/revoke",
+    response_model=PartnerInvitationResponse,
+    summary="Revoke a pending partner invitation",
+)
+def revoke_partner_invitation(
+    partner_id: UUID,
+    invitation_id: UUID,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerInvitationResponse:
+    try:
+        return service.revoke_invitation(partner_id, invitation_id, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/return",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Return partner onboarding for changes",
+)
+def return_partner_onboarding(
+    partner_id: UUID,
+    payload: PartnerOnboardingReviewRequest,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.return_onboarding(partner_id, payload, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/approve",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Approve partner onboarding after review",
+)
+def approve_partner_lifecycle(
+    partner_id: UUID,
+    payload: PartnerOnboardingReviewRequest,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.approve_partner(partner_id, payload, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/activate",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Activate an approved partner and provision access",
+)
+def activate_partner_lifecycle(
+    partner_id: UUID,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.activate_partner(partner_id, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/suspend",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Suspend an active partner without deleting financial history",
+)
+def suspend_partner_lifecycle(
+    partner_id: UUID,
+    payload: PartnerLifecycleActionRequest,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.suspend_partner(partner_id, payload, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/reactivate",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Reactivate a suspended partner",
+)
+def reactivate_partner_lifecycle(
+    partner_id: UUID,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.reactivate_partner(partner_id, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@partners_router.post(
+    "/{partner_id}/lifecycle/terminate",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Terminate and offboard a partner while preserving history",
+)
+def terminate_partner_lifecycle(
+    partner_id: UUID,
+    payload: PartnerLifecycleActionRequest,
+    user: User = Depends(require_partner_admin),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.terminate_partner(partner_id, payload, actor_user_id=user.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @partners_router.post(
@@ -738,12 +966,70 @@ def _portal_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
+@partner_portal_router.post(
+    "/invitations/accept",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Accept a partner onboarding invitation",
+)
+def accept_partner_portal_invitation(
+    payload: PartnerInvitationAccept,
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.accept_invitation(payload)
+    except PartnerSecurityError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
 @partner_portal_router.get("/me", response_model=PartnerPortalMeResponse, summary="Get authenticated partner profile")
 def get_partner_portal_me(
     partner: Partner = Depends(require_partner_portal),
     service: PartnerSyndicationService = Depends(get_service),
 ) -> PartnerPortalMeResponse:
     return service.portal_me(partner.id)
+
+
+@partner_portal_router.get(
+    "/onboarding",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Get authenticated partner onboarding status",
+)
+def get_partner_portal_onboarding(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    return service.portal_onboarding_status(partner.id)
+
+
+@partner_portal_router.patch(
+    "/onboarding/profile",
+    response_model=PartnerOnboardingProfileResponse,
+    summary="Update authenticated partner onboarding profile",
+)
+def update_partner_portal_onboarding_profile(
+    payload: PartnerOnboardingProfileUpdate,
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingProfileResponse:
+    try:
+        return service.update_onboarding_profile(partner.id, payload)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise _portal_error(exc) from exc
+
+
+@partner_portal_router.post(
+    "/onboarding/submit",
+    response_model=PartnerOnboardingStatusResponse,
+    summary="Submit authenticated partner onboarding for operator review",
+)
+def submit_partner_portal_onboarding(
+    partner: Partner = Depends(require_partner_portal),
+    service: PartnerSyndicationService = Depends(get_service),
+) -> PartnerOnboardingStatusResponse:
+    try:
+        return service.submit_onboarding(partner.id)
+    except (PartnerSecurityError, ValueError) as exc:
+        raise _portal_error(exc) from exc
 
 
 @partner_portal_router.get(
