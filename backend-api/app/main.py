@@ -24,6 +24,7 @@ from app.modules.streaming.api import router as streaming_router
 from app.modules.streaming.api.ingest_router import router as ingest_router
 from app.modules.streaming.processing.api import router as processing_router
 from app.modules.sheeko_xariiro.api import router as sheeko_xariiro_router
+from app.modules.workflows.api import workflow_runs_router, workflows_router
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -58,3 +59,5 @@ app.include_router(embed_router)
 app.include_router(sheeko_xariiro_router)
 app.include_router(chat_router)
 app.include_router(chat_websocket_router)
+app.include_router(workflows_router)
+app.include_router(workflow_runs_router)

@@ -5,6 +5,7 @@ import { initSheekoXariiroVoiceStudio } from "./SheekoXariiroVoiceStudio.jsx";
 import { initChatModerationConsole } from "./ChatModerationConsole.js";
 import { initExecutiveAnalyticsDashboard } from "./ExecutiveAnalyticsDashboard.js";
 import { initPartnerSyndicationDashboard } from "./PartnerSyndicationDashboard.js";
+import { initWorkflowOperationsDashboard } from "./WorkflowOperationsDashboard.js";
 
 export function initStudioDashboard(container) {
   let activeSubTab = "upload"; // default module tab
@@ -66,6 +67,7 @@ export function initStudioDashboard(container) {
         { id: "analytics", label: "Analytics Hub", icon: "📊" },
         { id: "executive-analytics", label: "Executive Analytics", icon: "📈" },
         { id: "partner-syndication", label: "Partner Syndication", icon: "🔗" },
+        { id: "workflow-ops", label: "Workflow Operations", icon: "⚡" },
         { id: "monetization", label: "Monetization Panel", icon: "💰" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
@@ -84,6 +86,7 @@ export function initStudioDashboard(container) {
         { id: "processing-center", label: "Processing Ops Center", icon: "⚙️" },
         { id: "executive-analytics", label: "Executive Analytics", icon: "📈" },
         { id: "partner-syndication", label: "Partner Syndication", icon: "🔗" },
+        { id: "workflow-ops", label: "Workflow Operations", icon: "⚡" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
     } else {
@@ -1118,6 +1121,10 @@ export function initStudioDashboard(container) {
       pane.innerHTML = `<div id="sheeko-xariiro-root"></div>`;
       const mountNode = pane.querySelector("#sheeko-xariiro-root");
       activeTabCleanup = initSheekoXariiroVoiceStudio(mountNode);
+    } else if (activeSubTab === "workflow-ops") {
+      pane.innerHTML = `<div id="workflow-ops-root"></div>`;
+      const mountNode = pane.querySelector("#workflow-ops-root");
+      activeTabCleanup = initWorkflowOperationsDashboard(mountNode);
     } else if (activeSubTab === "moderation") {
       pane.innerHTML = `<div id="chat-moderation-root"></div>`;
       const mountNode = pane.querySelector("#chat-moderation-root");
