@@ -6,8 +6,8 @@
   "scripts": {
     "studio": "vite --port 5174",
     "build": "vite build",
-    "lint": "node --check src/components/StudioDashboard.js && node --check src/components/ExecutiveAnalyticsDashboard.js && node --check src/components/PartnerSyndicationDashboard.js && node --check src/components/PartnerPortalDashboard.js && node --check src/main.js",
-    "test": "node --test src/components/sheekoXariiroLanguages.test.js"
+    "lint": "node --check src/components/StudioDashboard.js && node --check src/components/ExecutiveAnalyticsDashboard.js && node --check src/components/PartnerSyndicationDashboard.js && node --check src/components/PartnerPortalDashboard.js && node --check src/components/WorkflowOperationsDashboard.js && node --check src/main.js",
+    "test": "node --test src/components/sheekoXariiroLanguages.test.js src/components/WorkflowOperationsDashboard.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
