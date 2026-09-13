@@ -29,7 +29,9 @@ def utc_now() -> datetime:
 
 
 def enum_type(enum: type[StrEnum], name: str) -> Enum:
-    return Enum(enum, name=name, values_callable=lambda values: [item.value for item in values])
+    return Enum(
+        enum, name=name, values_callable=lambda values: [item.value for item in values]
+    )
 
 
 class WorkflowStatus(StrEnum):
@@ -104,18 +106,28 @@ class Workflow(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    workflow_type: Mapped[str] = mapped_column(String(80), nullable=False, default="standard")
+    workflow_type: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="standard"
+    )
     status: Mapped[WorkflowStatus] = mapped_column(
         enum_type(WorkflowStatus, "workflow_status_enum"),
         nullable=False,
         default=WorkflowStatus.DRAFT,
     )
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    retry_policy_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    retry_policy_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=3600)
-    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
 
     steps: Mapped[list[WorkflowStepDefinition]] = relationship(
         "WorkflowStepDefinition",
@@ -157,7 +169,9 @@ class WorkflowStepDefinition(Base):
     __tablename__ = "workflow_step_definitions"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    workflow_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False)
+    workflow_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
     step_order: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     step_type: Mapped[WorkflowStepType] = mapped_column(
@@ -170,8 +184,12 @@ class WorkflowStepDefinition(Base):
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     retry_delay_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     backoff_multiplier: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
 
     workflow: Mapped[Workflow] = relationship("Workflow", back_populates="steps")
 
@@ -187,7 +205,9 @@ class WorkflowRun(Base):
     __tablename__ = "workflow_runs"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    workflow_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False)
+    workflow_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
     workflow_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[WorkflowRunStatus] = mapped_column(
         enum_type(WorkflowRunStatus, "workflow_run_status_enum"),
@@ -201,16 +221,32 @@ class WorkflowRun(Base):
     )
     trigger_source: Mapped[str | None] = mapped_column(String(120), nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
-    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    causation_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     current_step_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    input_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    output_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    input_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    output_metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
     error_summary: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
 
     workflow: Mapped[Workflow] = relationship("Workflow", back_populates="runs")
     step_executions: Mapped[list[WorkflowStepExecution]] = relationship(
@@ -225,7 +261,9 @@ class WorkflowRun(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("workflow_id", "idempotency_key", name="uq_workflow_run_idempotency"),
+        UniqueConstraint(
+            "workflow_id", "idempotency_key", name="uq_workflow_run_idempotency"
+        ),
         Index("ix_workflow_runs_workflow_status", "workflow_id", "status"),
         Index("ix_workflow_runs_status_created", "status", "created_at"),
     )
@@ -237,9 +275,13 @@ class WorkflowStepExecution(Base):
     __tablename__ = "workflow_step_executions"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    run_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False)
+    run_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False
+    )
     step_definition_id: Mapped[UUID | None] = mapped_column(
-        Uuid, ForeignKey("workflow_step_definitions.id", ondelete="SET NULL"), nullable=True
+        Uuid,
+        ForeignKey("workflow_step_definitions.id", ondelete="SET NULL"),
+        nullable=True,
     )
     step_order: Mapped[int] = mapped_column(Integer, nullable=False)
     step_name: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -253,23 +295,41 @@ class WorkflowStepExecution(Base):
         default=WorkflowStepStatus.PENDING,
     )
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    causation_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     retry_delay_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     backoff_multiplier: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
-    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    retryable_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    retryable_failure: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
     input_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     output_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    error_details_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+    error_details_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
 
-    run: Mapped[WorkflowRun] = relationship("WorkflowRun", back_populates="step_executions")
+    run: Mapped[WorkflowRun] = relationship(
+        "WorkflowRun", back_populates="step_executions"
+    )
 
     __table_args__ = (
         UniqueConstraint("run_id", "step_order", name="uq_run_step_order"),
@@ -284,7 +344,9 @@ class WorkflowTrigger(Base):
     __tablename__ = "workflow_triggers"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    workflow_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False)
+    workflow_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
     trigger_type: Mapped[WorkflowTriggerType] = mapped_column(
         enum_type(WorkflowTriggerType, "workflow_trigger_type_enum"),
         nullable=False,
@@ -292,11 +354,17 @@ class WorkflowTrigger(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     event_pattern: Mapped[str | None] = mapped_column(String(120), nullable=True)
     schedule_cron: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    schedule_timezone: Mapped[str] = mapped_column(String(40), nullable=False, default="UTC")
+    schedule_timezone: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="UTC"
+    )
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
 
     workflow: Mapped[Workflow] = relationship("Workflow", back_populates="triggers")
 
@@ -311,15 +379,27 @@ class WorkflowSchedule(Base):
     __tablename__ = "workflow_schedules"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    workflow_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False)
-    schedule_type: Mapped[str] = mapped_column(String(32), nullable=False, default="recurring")
+    workflow_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    schedule_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="recurring"
+    )
     cron_expression: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     timezone: Mapped[str] = mapped_column(String(40), nullable=False, default="UTC")
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
 
     workflow: Mapped[Workflow] = relationship("Workflow", back_populates="schedules")
 
@@ -334,21 +414,33 @@ class WorkflowAuditLog(Base):
     __tablename__ = "workflow_audit_logs"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    workflow_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False)
-    run_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("workflow_runs.id", ondelete="SET NULL"), nullable=True)
+    workflow_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("workflow_runs.id", ondelete="SET NULL"), nullable=True
+    )
     step_execution_id: Mapped[UUID | None] = mapped_column(
-        Uuid, ForeignKey("workflow_step_executions.id", ondelete="SET NULL"), nullable=True
+        Uuid,
+        ForeignKey("workflow_step_executions.id", ondelete="SET NULL"),
+        nullable=True,
     )
     action: Mapped[WorkflowAuditAction] = mapped_column(
         enum_type(WorkflowAuditAction, "workflow_audit_action_enum"),
         nullable=False,
     )
-    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
 
     workflow: Mapped[Workflow] = relationship("Workflow", back_populates="audit_logs")
-    run: Mapped[WorkflowRun | None] = relationship("WorkflowRun", back_populates="audit_logs")
+    run: Mapped[WorkflowRun | None] = relationship(
+        "WorkflowRun", back_populates="audit_logs"
+    )
 
     __table_args__ = (
         Index("ix_workflow_audit_logs_workflow_created", "workflow_id", "created_at"),
