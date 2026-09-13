@@ -22,7 +22,9 @@ class WorkflowRetryPolicy(BaseModel):
     max_retries: int = Field(default=3, ge=0, le=10)
     retry_delay_seconds: int = Field(default=5, ge=1, le=3600)
     exponential_backoff: bool = Field(default=True)
-    retryable_errors: list[str] = Field(default_factory=lambda: ["timeout", "connection_error", "transient_error"])
+    retryable_errors: list[str] = Field(
+        default_factory=lambda: ["timeout", "connection_error", "transient_error"]
+    )
 
 
 class WorkflowStepDefinitionCreate(BaseModel):
@@ -75,7 +77,9 @@ class WorkflowCreate(BaseModel):
 
     @field_validator("steps")
     @classmethod
-    def validate_steps_order(cls, steps: list[WorkflowStepDefinitionCreate]) -> list[WorkflowStepDefinitionCreate]:
+    def validate_steps_order(
+        cls, steps: list[WorkflowStepDefinitionCreate]
+    ) -> list[WorkflowStepDefinitionCreate]:
         if not steps:
             return steps
         orders = [s.step_order for s in steps]
@@ -128,6 +132,8 @@ class WorkflowStepExecutionResponse(BaseModel):
     step_type: WorkflowStepType
     status: WorkflowStepStatus
     idempotency_key: str
+    correlation_id: str | None
+    causation_id: str | None
     retry_count: int
     max_retries: int
     retry_delay_seconds: int
@@ -155,6 +161,8 @@ class WorkflowRunResponse(BaseModel):
     trigger_type: WorkflowTriggerType
     trigger_source: str | None
     idempotency_key: str
+    correlation_id: str | None
+    causation_id: str | None
     actor_user_id: int | None
     current_step_order: int
     retry_count: int

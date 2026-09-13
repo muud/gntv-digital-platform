@@ -915,3 +915,33 @@ class EventService:
                 for log in audit_logs
             ],
         }
+
+    def enqueue_durable_dispatch(self, db: Session, event: DomainEvent) -> Any:
+        """Queue event dispatch while preserving event idempotency and trace context."""
+        from app.modules.jobs.queue import DatabaseJobQueue
+
+        return DatabaseJobQueue().enqueue(
+            db,
+            job_type="EVENT_DISPATCH",
+            payload={"event_id": str(event.id)},
+            queue_name="events",
+            idempotency_key=f"event-dispatch:{event.id}",
+            correlation_id=event.correlation_id,
+            causation_id=event.causation_id or str(event.id),
+        )
+
+    def enqueue_durable_outbound_delivery(
+        self, db: Session, delivery: OutboundWebhookDelivery, event: DomainEvent
+    ) -> Any:
+        """Queue an outbound delivery through the provider-neutral job boundary."""
+        from app.modules.jobs.queue import DatabaseJobQueue
+
+        return DatabaseJobQueue().enqueue(
+            db,
+            job_type="OUTBOUND_WEBHOOK_DELIVERY",
+            payload={"delivery_id": str(delivery.id)},
+            queue_name="webhooks",
+            idempotency_key=f"outbound-delivery:{delivery.id}",
+            correlation_id=event.correlation_id,
+            causation_id=str(event.id),
+        )

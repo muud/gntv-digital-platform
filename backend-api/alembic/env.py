@@ -18,6 +18,7 @@ from app.modules.cdn import models as cdn_models  # noqa: F401
 from app.modules.partners import models as partner_models  # noqa: F401
 from app.modules.workflows import models as workflow_models  # noqa: F401
 from app.modules.events import models as event_models  # noqa: F401
+from app.modules.jobs import models as job_models  # noqa: F401
 
 target_metadata = Base.metadata
 

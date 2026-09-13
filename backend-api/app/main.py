@@ -38,6 +38,13 @@ from app.modules.events.api import (
     webhook_deliveries_router,
     webhook_sources_router,
 )
+from app.modules.jobs import models as job_models  # noqa: F401
+from app.modules.jobs.api import (
+    job_dead_letters_router,
+    jobs_router,
+    schedules_router,
+    workers_router,
+)
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -80,3 +87,7 @@ app.include_router(webhook_deliveries_router)
 app.include_router(outbound_webhooks_router)
 app.include_router(dead_letters_router)
 app.include_router(public_webhooks_router)
+app.include_router(jobs_router)
+app.include_router(workers_router)
+app.include_router(schedules_router)
+app.include_router(job_dead_letters_router)

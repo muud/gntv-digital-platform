@@ -45,7 +45,9 @@ class WorkflowService:
         self.engine = engine or WorkflowEngine(repo)
 
     # 1. Workflow Management
-    def create_workflow(self, payload: WorkflowCreate, user_id: int | None = None) -> Workflow:
+    def create_workflow(
+        self, payload: WorkflowCreate, user_id: int | None = None
+    ) -> Workflow:
         workflow = Workflow(
             name=payload.name,
             description=payload.description,
@@ -53,7 +55,9 @@ class WorkflowService:
             status=WorkflowStatus.DRAFT,
             is_enabled=True,
             timeout_seconds=payload.timeout_seconds,
-            retry_policy_json=payload.retry_policy.model_dump() if payload.retry_policy else None,
+            retry_policy_json=payload.retry_policy.model_dump()
+            if payload.retry_policy
+            else None,
             created_by_user_id=user_id,
         )
         steps = [
@@ -122,12 +126,16 @@ class WorkflowService:
         )
         return self.repo.update_workflow(workflow, audit)
 
-    def activate_workflow(self, workflow_id: UUID, user_id: int | None = None) -> Workflow:
+    def activate_workflow(
+        self, workflow_id: UUID, user_id: int | None = None
+    ) -> Workflow:
         workflow = self.get_workflow(workflow_id)
         if workflow.status == WorkflowStatus.ARCHIVED:
             raise ValueError("Archived workflows cannot be activated")
         if not workflow.steps:
-            raise ValueError("Workflow must contain at least one step before activation")
+            raise ValueError(
+                "Workflow must contain at least one step before activation"
+            )
 
         workflow.status = WorkflowStatus.ACTIVE
         workflow.is_enabled = True
@@ -144,7 +152,9 @@ class WorkflowService:
     def pause_workflow(self, workflow_id: UUID, user_id: int | None = None) -> Workflow:
         workflow = self.get_workflow(workflow_id)
         if workflow.status != WorkflowStatus.ACTIVE:
-            raise ValueError(f"Cannot pause workflow in '{workflow.status.value}' state")
+            raise ValueError(
+                f"Cannot pause workflow in '{workflow.status.value}' state"
+            )
 
         workflow.status = WorkflowStatus.PAUSED
         workflow.updated_at = datetime.now(UTC)
@@ -167,6 +177,8 @@ class WorkflowService:
         trigger_source: str | None = None,
         actor_user_id: int | None = None,
         execute_now: bool = True,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
     ) -> WorkflowRun:
         workflow = self.get_workflow(workflow_id)
         if workflow.status != WorkflowStatus.ACTIVE:
@@ -177,7 +189,9 @@ class WorkflowService:
         resolved_idempotency_key = idempotency_key or f"wf-run-{uuid4().hex}"
 
         # Idempotency check: return existing run if key matches
-        existing_run = self.repo.get_workflow_run_by_idempotency(workflow_id, resolved_idempotency_key)
+        existing_run = self.repo.get_workflow_run_by_idempotency(
+            workflow_id, resolved_idempotency_key
+        )
         if existing_run is not None:
             return existing_run
 
@@ -189,6 +203,8 @@ class WorkflowService:
             trigger_type=trigger_type,
             trigger_source=trigger_source or "operator_api",
             idempotency_key=resolved_idempotency_key,
+            correlation_id=correlation_id,
+            causation_id=causation_id,
             actor_user_id=actor_user_id,
             input_metadata_json=sanitized_input,
             current_step_order=1,
@@ -203,6 +219,8 @@ class WorkflowService:
                 step_type=sd.step_type,
                 status=WorkflowStepStatus.PENDING,
                 idempotency_key=f"{resolved_idempotency_key}-step-{sd.step_order}",
+                correlation_id=correlation_id,
+                causation_id=causation_id,
                 timeout_seconds=sd.timeout_seconds,
                 max_retries=sd.max_retries,
                 retry_delay_seconds=sd.retry_delay_seconds,
@@ -217,7 +235,10 @@ class WorkflowService:
             workflow_id=workflow.id,
             action=WorkflowAuditAction.RUN_QUEUED,
             actor_user_id=actor_user_id,
-            metadata_json={"trigger_type": trigger_type.value, "idempotency_key": resolved_idempotency_key},
+            metadata_json={
+                "trigger_type": trigger_type.value,
+                "idempotency_key": resolved_idempotency_key,
+            },
         )
         created_run = self.repo.create_workflow_run(run, steps, audit)
 
@@ -227,6 +248,41 @@ class WorkflowService:
         if execute_now:
             return self.engine.execute_run(created_run.id)
         return created_run
+
+    def enqueue_durable_workflow_run(
+        self,
+        workflow_id: UUID,
+        input_metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
+        actor_user_id: int | None = None,
+    ) -> WorkflowRun:
+        """Create an idempotent run and enqueue its execution in the durable queue."""
+        run = self.trigger_workflow_run(
+            workflow_id=workflow_id,
+            input_metadata=input_metadata,
+            idempotency_key=idempotency_key,
+            trigger_type=WorkflowTriggerType.INTERNAL_EVENT,
+            trigger_source="durable_job_queue",
+            actor_user_id=actor_user_id,
+            execute_now=False,
+            correlation_id=correlation_id,
+            causation_id=causation_id,
+        )
+        from app.modules.jobs.queue import DatabaseJobQueue
+
+        DatabaseJobQueue().enqueue(
+            self.repo.db,
+            job_type="WORKFLOW_RUN",
+            payload={"run_id": str(run.id)},
+            queue_name="workflows",
+            idempotency_key=f"workflow-run:{run.id}",
+            correlation_id=correlation_id or str(run.id),
+            causation_id=causation_id,
+            actor_user_id=actor_user_id,
+        )
+        return run
 
     def get_workflow_run(self, run_id: UUID) -> WorkflowRun:
         run = self.repo.get_workflow_run(run_id)
@@ -241,7 +297,9 @@ class WorkflowService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[WorkflowRun]:
-        return self.repo.list_workflow_runs(workflow_id=workflow_id, status=status, limit=limit, offset=offset)
+        return self.repo.list_workflow_runs(
+            workflow_id=workflow_id, status=status, limit=limit, offset=offset
+        )
 
     def cancel_workflow_run(
         self,
@@ -249,7 +307,9 @@ class WorkflowService:
         reason: str | None = None,
         actor_user_id: int | None = None,
     ) -> WorkflowRun:
-        return self.engine.cancel_run(run_id, reason=reason, actor_user_id=actor_user_id)
+        return self.engine.cancel_run(
+            run_id, reason=reason, actor_user_id=actor_user_id
+        )
 
     # 3. Manual Approval
     def approve_step(
@@ -283,7 +343,9 @@ class WorkflowService:
         )
 
     # 4. Triggers & Schedules
-    def create_trigger(self, workflow_id: UUID, payload: WorkflowTriggerCreate) -> WorkflowTrigger:
+    def create_trigger(
+        self, workflow_id: UUID, payload: WorkflowTriggerCreate
+    ) -> WorkflowTrigger:
         self.get_workflow(workflow_id)
         trigger = WorkflowTrigger(
             workflow_id=workflow_id,
@@ -301,7 +363,9 @@ class WorkflowService:
         self.get_workflow(workflow_id)
         return self.repo.list_triggers(workflow_id)
 
-    def create_schedule(self, workflow_id: UUID, payload: WorkflowScheduleCreate) -> WorkflowSchedule:
+    def create_schedule(
+        self, workflow_id: UUID, payload: WorkflowScheduleCreate
+    ) -> WorkflowSchedule:
         self.get_workflow(workflow_id)
         schedule = WorkflowSchedule(
             workflow_id=workflow_id,
@@ -326,4 +390,6 @@ class WorkflowService:
         run_id: UUID | None = None,
         limit: int = 50,
     ) -> list[WorkflowAuditLog]:
-        return self.repo.list_audit_logs(workflow_id=workflow_id, run_id=run_id, limit=limit)
+        return self.repo.list_audit_logs(
+            workflow_id=workflow_id, run_id=run_id, limit=limit
+        )
