@@ -17,6 +17,7 @@ from app.modules.sheeko_xariiro import models as sheeko_xariiro_models  # noqa: 
 from app.modules.cdn import models as cdn_models  # noqa: F401
 from app.modules.partners import models as partner_models  # noqa: F401
 from app.modules.workflows import models as workflow_models  # noqa: F401
+from app.modules.events import models as event_models  # noqa: F401
 
 target_metadata = Base.metadata
 
@@ -55,6 +56,7 @@ def run_migrations_online() -> None:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
+
 
 if context.is_offline_mode():
     run_migrations_offline()
