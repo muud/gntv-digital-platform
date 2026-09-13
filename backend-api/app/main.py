@@ -11,7 +11,11 @@ from app.modules.analytics.api import router as analytics_router
 from app.modules.chat.api import router as chat_router
 from app.modules.chat.websocket import router as chat_websocket_router
 from app.modules.monetization.api import router as monetization_router
-from app.modules.partners.api import embed_router, partner_portal_router, partners_router
+from app.modules.partners.api import (
+    embed_router,
+    partner_portal_router,
+    partners_router,
+)
 from app.modules.cms.api import content_router
 from app.modules.cms.media.api import download_router as media_download_router
 from app.modules.cms.media.api import router as media_router
@@ -25,6 +29,15 @@ from app.modules.streaming.api.ingest_router import router as ingest_router
 from app.modules.streaming.processing.api import router as processing_router
 from app.modules.sheeko_xariiro.api import router as sheeko_xariiro_router
 from app.modules.workflows.api import workflow_runs_router, workflows_router
+from app.modules.events import models as event_models  # noqa: F401
+from app.modules.events.api import (
+    dead_letters_router,
+    events_router,
+    outbound_webhooks_router,
+    public_webhooks_router,
+    webhook_deliveries_router,
+    webhook_sources_router,
+)
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -61,3 +74,9 @@ app.include_router(chat_router)
 app.include_router(chat_websocket_router)
 app.include_router(workflows_router)
 app.include_router(workflow_runs_router)
+app.include_router(events_router)
+app.include_router(webhook_sources_router)
+app.include_router(webhook_deliveries_router)
+app.include_router(outbound_webhooks_router)
+app.include_router(dead_letters_router)
+app.include_router(public_webhooks_router)
