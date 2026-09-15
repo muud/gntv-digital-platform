@@ -53,6 +53,7 @@ from app.modules.workflows.service import WorkflowService
 logger = logging.getLogger(__name__)
 
 APPROVED_EVENT_TYPES: set[str] = {
+    "agent.*",
     "content.created",
     "content.updated",
     "content.approved",

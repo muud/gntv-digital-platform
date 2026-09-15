@@ -45,6 +45,16 @@ from app.modules.jobs.api import (
     schedules_router,
     workers_router,
 )
+from app.modules.agents import models as agent_models  # noqa: F401
+from app.modules.agents.api import (
+    agents_router,
+    approval_policies_router,
+    approvals_router,
+    metrics_router as agent_metrics_router,
+    model_policies_router,
+    runs_router as agent_runs_router,
+    tool_policies_router,
+)
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -91,3 +101,10 @@ app.include_router(jobs_router)
 app.include_router(workers_router)
 app.include_router(schedules_router)
 app.include_router(job_dead_letters_router)
+app.include_router(agents_router)
+app.include_router(agent_runs_router)
+app.include_router(approvals_router)
+app.include_router(model_policies_router)
+app.include_router(tool_policies_router)
+app.include_router(approval_policies_router)
+app.include_router(agent_metrics_router)
