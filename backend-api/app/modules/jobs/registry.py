@@ -26,6 +26,7 @@ class SafeJobType(StrEnum):
     CONTENT_PUBLISH_REQUEST = "CONTENT_PUBLISH_REQUEST"
     DISTRIBUTION_REQUEST = "DISTRIBUTION_REQUEST"
     MEDIA_PROCESSING_REQUEST = "MEDIA_PROCESSING_REQUEST"
+    AI_AGENT_RUN = "AI_AGENT_RUN"
 
 
 JobHandler = Callable[[Session, DurableJob], dict[str, Any]]
@@ -194,6 +195,38 @@ def default_media_processing_handler(db: Session, job: DurableJob) -> dict[str, 
     }
 
 
+def default_ai_agent_run_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    """Execute one persisted AI agent run through the bounded control-plane engine."""
+    run_id_raw = (job.payload_json or {}).get("agent_run_id")
+    if not run_id_raw:
+        raise NonRetryableJobError(
+            "Missing required 'agent_run_id' in AI_AGENT_RUN payload"
+        )
+    try:
+        run_id = UUID(str(run_id_raw))
+    except (ValueError, TypeError) as exc:
+        raise NonRetryableJobError("Invalid agent_run_id") from exc
+    from app.modules.agents.engine import AgentExecutionEngine
+    from app.modules.agents.models import AgentToolCall, ToolCallStatus
+    from sqlalchemy import select
+
+    engine = AgentExecutionEngine(db)
+    approved_call = db.scalar(
+        select(AgentToolCall)
+        .where(
+            AgentToolCall.agent_run_id == run_id,
+            AgentToolCall.status == ToolCallStatus.APPROVED,
+        )
+        .order_by(AgentToolCall.created_at.desc())
+    )
+    run = (
+        engine.resume_approved_tool(run_id, approved_call.id)
+        if approved_call
+        else engine.execute(run_id)
+    )
+    return {"agent_run_id": str(run.id), "status": run.status.value}
+
+
 class JobTypeRegistry:
     """Registry maintaining allowlisted safe executable job types."""
 
@@ -216,6 +249,7 @@ class JobTypeRegistry:
         self.register(
             SafeJobType.MEDIA_PROCESSING_REQUEST, default_media_processing_handler
         )
+        self.register(SafeJobType.AI_AGENT_RUN, default_ai_agent_run_handler)
 
     def register(self, job_type: str, handler: JobHandler) -> None:
         # Check against allowlist enum values

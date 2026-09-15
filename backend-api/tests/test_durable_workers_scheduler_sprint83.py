@@ -250,7 +250,7 @@ def test_registered_handlers_are_bounded_and_classify_errors() -> None:
         with pytest.raises(NonRetryableJobError):
             default_job_registry.execute(db, job)
 
-    assert len(default_job_registry.list_types()) == 8
+    assert len(default_job_registry.list_types()) == 9
 
 
 def test_interval_cron_and_timezone_calculation() -> None:

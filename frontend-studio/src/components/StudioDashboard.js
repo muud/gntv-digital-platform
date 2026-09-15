@@ -8,6 +8,7 @@ import { initPartnerSyndicationDashboard } from "./PartnerSyndicationDashboard.j
 import { initWorkflowOperationsDashboard } from "./WorkflowOperationsDashboard.js";
 import { initEventAutomationDashboard } from "./EventAutomationDashboard.js";
 import { initBackgroundJobsDashboard } from "./BackgroundJobsDashboard.js";
+import { initAgentControlDashboard } from "./AgentControlDashboard.js";
 
 export function initStudioDashboard(container) {
   let activeSubTab = "upload"; // default module tab
@@ -72,6 +73,7 @@ export function initStudioDashboard(container) {
         { id: "workflow-ops", label: "Workflow Operations", icon: "⚡" },
         { id: "event-automation", label: "Event Automation", icon: "🔔" },
         { id: "background-jobs", label: "Background Jobs", icon: "🧰" },
+        { id: "ai-agents", label: "AI Agents", icon: "🤖" },
         { id: "monetization", label: "Monetization Panel", icon: "💰" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
@@ -93,6 +95,7 @@ export function initStudioDashboard(container) {
         { id: "workflow-ops", label: "Workflow Operations", icon: "⚡" },
         { id: "event-automation", label: "Event Automation", icon: "🔔" },
         { id: "background-jobs", label: "Background Jobs", icon: "🧰" },
+        { id: "ai-agents", label: "AI Agents", icon: "🤖" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
     } else {
@@ -1139,6 +1142,10 @@ export function initStudioDashboard(container) {
       pane.innerHTML = `<div id="background-jobs-root"></div>`;
       const mountNode = pane.querySelector("#background-jobs-root");
       activeTabCleanup = initBackgroundJobsDashboard(mountNode);
+    } else if (activeSubTab === "ai-agents") {
+      pane.innerHTML = `<div id="agent-control-root"></div>`;
+      const mountNode = pane.querySelector("#agent-control-root");
+      activeTabCleanup = initAgentControlDashboard(mountNode);
     } else if (activeSubTab === "moderation") {
       pane.innerHTML = `<div id="chat-moderation-root"></div>`;
       const mountNode = pane.querySelector("#chat-moderation-root");
