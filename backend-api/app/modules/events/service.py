@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 APPROVED_EVENT_TYPES: set[str] = {
     "agent.*",
+    "autopilot.*",
     "content.created",
     "content.updated",
     "content.approved",
