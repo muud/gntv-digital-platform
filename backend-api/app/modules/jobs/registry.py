@@ -27,6 +27,12 @@ class SafeJobType(StrEnum):
     DISTRIBUTION_REQUEST = "DISTRIBUTION_REQUEST"
     MEDIA_PROCESSING_REQUEST = "MEDIA_PROCESSING_REQUEST"
     AI_AGENT_RUN = "AI_AGENT_RUN"
+    AUTOPILOT_RESEARCH = "AUTOPILOT_RESEARCH"
+    AUTOPILOT_SCRIPT_GENERATION = "AUTOPILOT_SCRIPT_GENERATION"
+    AUTOPILOT_PRODUCTION_PLAN = "AUTOPILOT_PRODUCTION_PLAN"
+    AUTOPILOT_ASSET_PREPARATION = "AUTOPILOT_ASSET_PREPARATION"
+    AUTOPILOT_PUBLISH = "AUTOPILOT_PUBLISH"
+    AUTOPILOT_POST_PUBLISH_VERIFY = "AUTOPILOT_POST_PUBLISH_VERIFY"
 
 
 JobHandler = Callable[[Session, DurableJob], dict[str, Any]]
@@ -227,6 +233,43 @@ def default_ai_agent_run_handler(db: Session, job: DurableJob) -> dict[str, Any]
     return {"agent_run_id": str(run.id), "status": run.status.value}
 
 
+def default_autopilot_research_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    payload = job.payload_json or {}
+    task_id = payload.get("research_task_id")
+    if not task_id:
+        raise NonRetryableJobError("Missing research_task_id")
+    from app.modules.autopilot.service import AutopilotService
+
+    task = AutopilotService(db).complete_research_task(UUID(str(task_id)))
+    return {"research_task_id": str(task.id), "status": task.status.value}
+
+
+def default_autopilot_passthrough_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    return {"status": "recorded", "payload": job.payload_json or {}}
+
+
+def default_autopilot_publish_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    payload = job.payload_json or {}
+    attempt_id = payload.get("attempt_id")
+    if not attempt_id:
+        raise NonRetryableJobError("Missing attempt_id")
+    from app.modules.autopilot.service import AutopilotService
+
+    attempt = AutopilotService(db).execute_publish_attempt(UUID(str(attempt_id)))
+    return {"attempt_id": str(attempt.id), "status": attempt.status.value}
+
+
+def default_autopilot_verify_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    payload = job.payload_json or {}
+    attempt_id = payload.get("attempt_id")
+    if not attempt_id:
+        raise NonRetryableJobError("Missing attempt_id")
+    from app.modules.autopilot.service import AutopilotService
+
+    attempt = AutopilotService(db).verify_publication(UUID(str(attempt_id)))
+    return {"attempt_id": str(attempt.id), "status": attempt.status.value}
+
+
 class JobTypeRegistry:
     """Registry maintaining allowlisted safe executable job types."""
 
@@ -250,6 +293,24 @@ class JobTypeRegistry:
             SafeJobType.MEDIA_PROCESSING_REQUEST, default_media_processing_handler
         )
         self.register(SafeJobType.AI_AGENT_RUN, default_ai_agent_run_handler)
+        self.register(SafeJobType.AUTOPILOT_RESEARCH, default_autopilot_research_handler)
+        self.register(
+            SafeJobType.AUTOPILOT_SCRIPT_GENERATION,
+            default_autopilot_passthrough_handler,
+        )
+        self.register(
+            SafeJobType.AUTOPILOT_PRODUCTION_PLAN,
+            default_autopilot_passthrough_handler,
+        )
+        self.register(
+            SafeJobType.AUTOPILOT_ASSET_PREPARATION,
+            default_autopilot_passthrough_handler,
+        )
+        self.register(SafeJobType.AUTOPILOT_PUBLISH, default_autopilot_publish_handler)
+        self.register(
+            SafeJobType.AUTOPILOT_POST_PUBLISH_VERIFY,
+            default_autopilot_verify_handler,
+        )
 
     def register(self, job_type: str, handler: JobHandler) -> None:
         # Check against allowlist enum values
@@ -266,12 +327,14 @@ class JobTypeRegistry:
     def get_handler(self, job_type: str) -> JobHandler | None:
         return self._handlers.get(job_type)
 
-    def list_types(self) -> dict[str, str]:
+    def list_types(self, include_autopilot: bool = False) -> dict[str, str]:
         """Return {job_type: description} for all registered handlers."""
+        hidden_prefixes = () if include_autopilot else ("AUTOPILOT_",)
         return {
             t.value: t.name.replace("_", " ").title()
             for t in SafeJobType
             if t.value in self._handlers
+            and not any(t.value.startswith(prefix) for prefix in hidden_prefixes)
         }
 
     def execute(self, db: Session, job: DurableJob) -> dict[str, Any]:
