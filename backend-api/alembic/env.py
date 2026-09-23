@@ -21,6 +21,7 @@ from app.modules.events import models as event_models  # noqa: F401
 from app.modules.jobs import models as job_models  # noqa: F401
 from app.modules.agents import models as agent_models  # noqa: F401
 from app.modules.autopilot import models as autopilot_models  # noqa: F401
+from app.modules.reliability import models as reliability_models  # noqa: F401
 
 target_metadata = Base.metadata
 

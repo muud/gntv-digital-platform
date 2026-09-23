@@ -57,6 +57,8 @@ from app.modules.agents.api import (
 )
 from app.modules.autopilot import models as autopilot_models  # noqa: F401
 from app.modules.autopilot.api import router as autopilot_router
+from app.modules.reliability import models as reliability_models  # noqa: F401
+from app.modules.reliability.api import router as reliability_router
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
@@ -111,3 +113,4 @@ app.include_router(tool_policies_router)
 app.include_router(approval_policies_router)
 app.include_router(agent_metrics_router)
 app.include_router(autopilot_router)
+app.include_router(reliability_router)
