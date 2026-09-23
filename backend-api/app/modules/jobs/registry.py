@@ -33,6 +33,12 @@ class SafeJobType(StrEnum):
     AUTOPILOT_ASSET_PREPARATION = "AUTOPILOT_ASSET_PREPARATION"
     AUTOPILOT_PUBLISH = "AUTOPILOT_PUBLISH"
     AUTOPILOT_POST_PUBLISH_VERIFY = "AUTOPILOT_POST_PUBLISH_VERIFY"
+    RELIABILITY_HEALTH_CHECK = "RELIABILITY_HEALTH_CHECK"
+    RELIABILITY_INCIDENT_EVALUATE = "RELIABILITY_INCIDENT_EVALUATE"
+    RELIABILITY_RECOVERY_RUN = "RELIABILITY_RECOVERY_RUN"
+    RELIABILITY_RECOVERY_VERIFY = "RELIABILITY_RECOVERY_VERIFY"
+    RELIABILITY_BACKUP_VERIFY = "RELIABILITY_BACKUP_VERIFY"
+    RELIABILITY_DR_READINESS_CHECK = "RELIABILITY_DR_READINESS_CHECK"
 
 
 JobHandler = Callable[[Session, DurableJob], dict[str, Any]]
@@ -270,6 +276,70 @@ def default_autopilot_verify_handler(db: Session, job: DurableJob) -> dict[str, 
     return {"attempt_id": str(attempt.id), "status": attempt.status.value}
 
 
+def default_reliability_health_check_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    from app.modules.reliability.service import ReliabilityService
+
+    payload = job.payload_json or {}
+    correlation_id = payload.get("correlation_id")
+    snapshot = ReliabilityService(db).trigger_health_check(correlation_id=correlation_id)
+    return {
+        "snapshot_id": str(snapshot.id),
+        "overall_status": snapshot.overall_status.value,
+        "health_score": snapshot.health_score,
+    }
+
+
+def default_reliability_incident_evaluate_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    payload = job.payload_json or {}
+    incident_id = payload.get("incident_id")
+    if not incident_id:
+        raise NonRetryableJobError("Missing incident_id")
+    from app.modules.reliability.service import ReliabilityService
+
+    incident = ReliabilityService(db).get_incident(UUID(str(incident_id)))
+    return {"incident_id": str(incident.id), "state": incident.state.value}
+
+
+def default_reliability_recovery_run_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    payload = job.payload_json or {}
+    run_id = payload.get("run_id")
+    if not run_id:
+        raise NonRetryableJobError("Missing run_id")
+    from app.modules.reliability.service import ReliabilityService
+
+    run = ReliabilityService(db).execute_recovery_run(UUID(str(run_id)))
+    return {"run_id": str(run.id), "status": run.status.value}
+
+
+def default_reliability_recovery_verify_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    payload = job.payload_json or {}
+    run_id = payload.get("run_id")
+    if not run_id:
+        raise NonRetryableJobError("Missing run_id")
+    from app.modules.reliability.service import ReliabilityService
+
+    run = ReliabilityService(db).verify_recovery(UUID(str(run_id)))
+    return {"run_id": str(run.id), "verification_status": run.verification_status}
+
+
+def default_reliability_backup_verify_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    payload = job.payload_json or {}
+    backup_id = payload.get("backup_id")
+    if not backup_id:
+        raise NonRetryableJobError("Missing backup_id")
+    from app.modules.reliability.service import ReliabilityService
+
+    record = ReliabilityService(db).verify_backup(UUID(str(backup_id)))
+    return {"backup_id": str(record.id), "verification_result": record.verification_result}
+
+
+def default_reliability_dr_readiness_check_handler(db: Session, job: DurableJob) -> dict[str, Any]:
+    from app.modules.reliability.service import ReliabilityService
+
+    readiness = ReliabilityService(db).evaluate_dr_readiness()
+    return {"overall_status": readiness.overall_status.value}
+
+
 class JobTypeRegistry:
     """Registry maintaining allowlisted safe executable job types."""
 
@@ -311,6 +381,30 @@ class JobTypeRegistry:
             SafeJobType.AUTOPILOT_POST_PUBLISH_VERIFY,
             default_autopilot_verify_handler,
         )
+        self.register(
+            SafeJobType.RELIABILITY_HEALTH_CHECK,
+            default_reliability_health_check_handler,
+        )
+        self.register(
+            SafeJobType.RELIABILITY_INCIDENT_EVALUATE,
+            default_reliability_incident_evaluate_handler,
+        )
+        self.register(
+            SafeJobType.RELIABILITY_RECOVERY_RUN,
+            default_reliability_recovery_run_handler,
+        )
+        self.register(
+            SafeJobType.RELIABILITY_RECOVERY_VERIFY,
+            default_reliability_recovery_verify_handler,
+        )
+        self.register(
+            SafeJobType.RELIABILITY_BACKUP_VERIFY,
+            default_reliability_backup_verify_handler,
+        )
+        self.register(
+            SafeJobType.RELIABILITY_DR_READINESS_CHECK,
+            default_reliability_dr_readiness_check_handler,
+        )
 
     def register(self, job_type: str, handler: JobHandler) -> None:
         # Check against allowlist enum values
@@ -327,9 +421,15 @@ class JobTypeRegistry:
     def get_handler(self, job_type: str) -> JobHandler | None:
         return self._handlers.get(job_type)
 
-    def list_types(self, include_autopilot: bool = False) -> dict[str, str]:
+    def list_types(
+        self, include_autopilot: bool = False, include_reliability: bool = False
+    ) -> dict[str, str]:
         """Return {job_type: description} for all registered handlers."""
-        hidden_prefixes = () if include_autopilot else ("AUTOPILOT_",)
+        hidden_prefixes: list[str] = []
+        if not include_autopilot:
+            hidden_prefixes.append("AUTOPILOT_")
+        if not include_reliability:
+            hidden_prefixes.append("RELIABILITY_")
         return {
             t.value: t.name.replace("_", " ").title()
             for t in SafeJobType

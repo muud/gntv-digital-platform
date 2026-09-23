@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 APPROVED_EVENT_TYPES: set[str] = {
     "agent.*",
     "autopilot.*",
+    "reliability.*",
     "content.created",
     "content.updated",
     "content.approved",
@@ -732,7 +733,11 @@ class EventService:
         mapped_event_type = mapping.get(
             raw_event_type, f"{source.source_key}.{raw_event_type}"
         )
-        if mapped_event_type not in APPROVED_EVENT_TYPES:
+        if (
+            mapped_event_type not in APPROVED_EVENT_TYPES
+            or mapped_event_type.endswith("*")
+            or mapped_event_type.startswith("reliability.")
+        ):
             return 422, {"detail": "Mapped event type is not registered"}
 
         delivery = EventRepository.create_webhook_delivery(

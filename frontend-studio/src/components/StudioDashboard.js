@@ -10,6 +10,7 @@ import { initEventAutomationDashboard } from "./EventAutomationDashboard.js";
 import { initBackgroundJobsDashboard } from "./BackgroundJobsDashboard.js";
 import { initAgentControlDashboard } from "./AgentControlDashboard.js";
 import { initAutopilotProductionDashboard } from "./AutopilotProductionDashboard.js";
+import { initReliabilityOperationsDashboard } from "./ReliabilityOperationsDashboard.js";
 
 export function initStudioDashboard(container) {
   let activeSubTab = "upload"; // default module tab
@@ -76,6 +77,7 @@ export function initStudioDashboard(container) {
         { id: "background-jobs", label: "Background Jobs", icon: "🧰" },
         { id: "ai-agents", label: "AI Agents", icon: "🤖" },
         { id: "autopilot", label: "Autopilot", icon: "🛫" },
+        { id: "reliability", label: "Reliability & DR", icon: "🛡️" },
         { id: "monetization", label: "Monetization Panel", icon: "💰" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
@@ -99,6 +101,7 @@ export function initStudioDashboard(container) {
         { id: "background-jobs", label: "Background Jobs", icon: "🧰" },
         { id: "ai-agents", label: "AI Agents", icon: "🤖" },
         { id: "autopilot", label: "Autopilot", icon: "🛫" },
+        { id: "reliability", label: "Reliability & DR", icon: "🛡️" },
         { id: "moderation", label: "Chat Moderation", icon: "🛡️" }
       ];
     } else {
@@ -1153,6 +1156,10 @@ export function initStudioDashboard(container) {
       pane.innerHTML = `<div id="autopilot-root"></div>`;
       const mountNode = pane.querySelector("#autopilot-root");
       activeTabCleanup = initAutopilotProductionDashboard(mountNode);
+    } else if (activeSubTab === "reliability") {
+      pane.innerHTML = `<div id="reliability-root"></div>`;
+      const mountNode = pane.querySelector("#reliability-root");
+      activeTabCleanup = initReliabilityOperationsDashboard(mountNode);
     } else if (activeSubTab === "moderation") {
       pane.innerHTML = `<div id="chat-moderation-root"></div>`;
       const mountNode = pane.querySelector("#chat-moderation-root");
