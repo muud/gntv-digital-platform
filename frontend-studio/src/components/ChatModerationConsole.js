@@ -15,12 +15,22 @@ function readEnv(name) {
 }
 
 function apiBase() {
-  return (readEnv("VITE_CHAT_API_URL") || "http://localhost:8000/api/v1/chat").replace(/\/$/, "");
+  const explicit = readEnv("VITE_CHAT_API_URL");
+  if (explicit) return explicit.replace(/\/$/, "");
+  const generalApi = readEnv("VITE_API_URL");
+  if (generalApi) return `${generalApi.replace(/\/$/, "")}/api/v1/chat`;
+  return "http://localhost:8000/api/v1/chat";
 }
 
 function wsBase() {
   const explicit = readEnv("VITE_CHAT_WS_URL");
   if (explicit) return explicit.replace(/\/$/, "");
+  const generalApi = readEnv("VITE_API_URL");
+  if (generalApi) {
+    const wsProto = generalApi.startsWith("https") ? "wss:" : "ws:";
+    const host = generalApi.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return `${wsProto}//${host}/ws/chat`;
+  }
   return "ws://localhost:8000/ws/chat";
 }
 
