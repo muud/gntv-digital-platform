@@ -190,3 +190,9 @@ class WorkerService:
         ):
             return WorkerStatus.UNHEALTHY
         return record.status
+
+
+if __name__ == "__main__":
+    from app.modules.jobs.worker_runner import main
+
+    main()

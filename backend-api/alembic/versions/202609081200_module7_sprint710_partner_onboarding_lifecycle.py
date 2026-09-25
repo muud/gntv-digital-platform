@@ -88,6 +88,9 @@ partner_lifecycle_audit_action_enum = sa.Enum(
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    partner_lifecycle_status_enum.create(bind, checkfirst=True)
+
     # 0. Add lifecycle columns to partners table if missing
     with op.batch_alter_table("partners") as batch_op:
         batch_op.add_column(
@@ -232,3 +235,6 @@ def downgrade() -> None:
     with op.batch_alter_table("partners") as batch_op:
         batch_op.drop_column("lifecycle_updated_at")
         batch_op.drop_column("lifecycle_status")
+
+    bind = op.get_bind()
+    partner_lifecycle_status_enum.drop(bind, checkfirst=True)

@@ -241,3 +241,9 @@ class SchedulerService:
         )
         self.db.flush()
         return job
+
+
+if __name__ == "__main__":
+    from app.modules.jobs.scheduler_runner import main
+
+    main()
